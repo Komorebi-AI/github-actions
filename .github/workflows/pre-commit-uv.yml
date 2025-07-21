@@ -6,7 +6,7 @@ on:
       python-version:
         required: false
         type: string
-        default: .python-version
+        default: ''
       uv-version:
         required: false
         type: string
