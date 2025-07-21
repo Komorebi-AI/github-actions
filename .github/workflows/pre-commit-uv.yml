@@ -1,0 +1,48 @@
+name: pre-commit
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        required: false
+        type: string
+        default: .python-version
+      uv-version:
+        required: false
+        type: string
+        default: latest
+      pre-commit-args:
+        required: false
+        type: string
+        default: ''
+    secrets:
+      ssh-private-key:
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  pytest:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v4
+      # Required to install from Github private repositories
+      # Only run if `ssh-private-key` is set
+      - uses: webfactory/ssh-agent@v0.9.1
+        if: ${{ secrets.ssh-private-key != '' }}
+        with:
+          ssh-private-key: ${{ secrets.ssh-private-key }}
+      - name: Install uv and set the python version
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ inputs.uv-version }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: ${{ inputs.python-version }}
+      - name: Install the project
+        run: |
+          uv sync --locked --dev
+          uv pip install pre-commit-uv
+      - uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: ${{ inputs.pre-commit-args }}
