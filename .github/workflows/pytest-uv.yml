@@ -19,7 +19,7 @@ on:
 
 jobs:
   pytest:
-    runs-on: "ubuntu-latest"
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       # Required to install from Github private repositories
@@ -33,7 +33,7 @@ jobs:
         with:
           version: ${{ inputs.uv-version }}
           enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          cache-dependency-glob: uv.lock
           python-version: ${{ inputs.python-version }}
       - name: Install the project
         run: |
