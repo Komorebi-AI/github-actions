@@ -16,6 +16,7 @@ on:
         required: false
         type: string
         default: ''
+  workflow_dispatch:
 
 jobs:
   pytest:
