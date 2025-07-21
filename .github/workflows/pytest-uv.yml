@@ -14,6 +14,11 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+        codecov-token: 
+          required: false
+        ssh-private-key:
+          required: false
 
 jobs:
   pytest:
@@ -25,6 +30,12 @@ jobs:
         if: ${{ inputs.debug-enabled }}
         with:
           detached: true
+      - uses: webfactory/ssh-agent@v0.9.1
+        env: 
+            ssh-private-key: ${{ secrets.ssh-private-key }}
+        if: ${{ env.ssh-private-key != '' }}
+        with:
+          ssh-private-key: ${{ secrets.ssh-private-key }}
       # We support a specific Python version as arg or reading it from
       # the .python-version file
       - name: Install uv and Python
@@ -53,3 +64,13 @@ jobs:
       - name: Test with pytest
         run: |
           uv run pytest
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        env: 
+            codecov-token: ${{ secrets.codecov-token }}
+        if: ${{ env.codecov-token != '' }}
+        with:
+          token: ${{ secrets.codecov-token }}
+          name: codecov-umbrella
+          fail_ci_if_error: false
+          verbose: true
