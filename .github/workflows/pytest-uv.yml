@@ -6,7 +6,6 @@ on:
       python-version:
         required: false
         type: string
-        default: .python-version
       uv-version:
         required: false
         type: string
@@ -26,13 +25,28 @@ jobs:
         if: ${{ inputs.debug-enabled }}
         with:
           detached: true
-      - name: Install uv and set the python version
+      # We support a specific Python version as arg or reading it from
+      # the .python-version file
+      - name: Install uv and Python
+        if: ${{ inputs.python-version != '' }}
         uses: astral-sh/setup-uv@v6
         with:
           version: ${{ inputs.uv-version }}
           enable-cache: true
           cache-dependency-glob: uv.lock
           python-version: ${{ inputs.python-version }}
+      - name: Install uv and Python using .python-version
+        if: ${{ inputs.python-version == '' }}
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ inputs.uv-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # Alternative, sometimes faster due to Github caching the Python version
+      # - name: "Set up Python"
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version-file: ".python-version" OR python-version: ${{ inputs.python-version }}
       - name: Install the project
         run: |
           uv sync --locked --dev
