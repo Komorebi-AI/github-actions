@@ -18,6 +18,12 @@ jobs:
       ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 ```
 
+See other usage examples in the [Komorebi-AI/python-template](https://github.com/Komorebi-AI/python-template) repository:
+ 
+- [pre-commit-main.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/pre-commit-main.yml)
+- [pre-commit-pr.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/pre-commit-pr.yml)
+- [pytest.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/pytest.yml)
+
 All arguments are optional, these are the default values:
 
 - `uv-version`: use latest version
