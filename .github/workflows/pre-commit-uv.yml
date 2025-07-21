@@ -15,19 +15,38 @@ on:
         required: false
         type: string
         default: ''
+      debug-enabled:
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install uv and set the python version
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ inputs.debug-enabled }}
+        with:
+          detached: true
+      # We support a specific Python version as arg or reading it from
+      # the .python-version file
+      - name: Install uv and Python
+        if: ${{ inputs.python-version != '' }}
         uses: astral-sh/setup-uv@v6
         with:
           version: ${{ inputs.uv-version }}
           enable-cache: true
           cache-dependency-glob: uv.lock
           python-version: ${{ inputs.python-version }}
+      - name: Install uv and Python using .python-version
+        if: ${{ inputs.python-version == '' }}
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ inputs.uv-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - name: Install the project
         run: |
           uv sync --locked --dev
