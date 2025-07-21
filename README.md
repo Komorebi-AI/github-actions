@@ -29,7 +29,7 @@ Secrets are also optional:
 - if `codecov-token` is set coverage will be computed and uploaded to Codecov
 - if `ssh-private-key` is set dependencies can be installed from Github repositories inside the Komorebi-AI organization (using the [ssh-agent](https://github.com/webfactory/ssh-agent) Github Action)
 
-To pass all secrets to called workflow `secrets: inherit` can be used.
+To pass all secrets to called workflow use `secrets: inherit`.
 
 ## Documentation
 
