@@ -14,9 +14,6 @@ on:
     secrets:
       ssh-private-key:
         required: false
-        type: string
-        default: ''
-  workflow_dispatch:
 
 jobs:
   pytest:
@@ -26,7 +23,9 @@ jobs:
       # Required to install from Github private repositories
       # Only run if `ssh-private-key` is set
       - uses: webfactory/ssh-agent@v0.9.1
-        if: ${{ secrets.ssh-private-key != '' }}
+        env: 
+            ssh-private-key: ${{ secrets.ssh-private-key }}
+        if: ${{ env.ssh-private-key != '' }}
         with:
           ssh-private-key: ${{ secrets.ssh-private-key }}
       - name: Install uv and set the python version
