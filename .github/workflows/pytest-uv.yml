@@ -11,23 +11,12 @@ on:
         required: false
         type: string
         default: latest
-    secrets:
-      ssh-private-key:
-        required: false
 
 jobs:
   pytest:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Required to install from Github private repositories
-      # Only run if `ssh-private-key` is set
-      - uses: webfactory/ssh-agent@v0.9.1
-        env: 
-            ssh-private-key: ${{ secrets.ssh-private-key }}
-        if: ${{ env.ssh-private-key != '' }}
-        with:
-          ssh-private-key: ${{ secrets.ssh-private-key }}
       - name: Install uv and set the python version
         uses: astral-sh/setup-uv@v6
         with:
