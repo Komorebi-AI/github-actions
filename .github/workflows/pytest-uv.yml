@@ -49,7 +49,7 @@ jobs:
       #     python-version-file: ".python-version" OR python-version: ${{ inputs.python-version }}
       - name: Install the project
         run: |
-          uv sync --locked --dev
+          uv sync --locked --dev --all-extras
       - name: Test with pytest
         run: |
           uv run pytest
