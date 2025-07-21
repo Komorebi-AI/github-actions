@@ -19,6 +19,9 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      ssh-private-key:
+        required: false
 
 jobs:
   pre-commit:
@@ -33,8 +36,16 @@ jobs:
         if: ${{ inputs.debug-enabled }}
         with:
           detached: true
+      - uses: webfactory/ssh-agent@v0.9.1
+        env: 
+            ssh-private-key: ${{ secrets.ssh-private-key }}
+        if: ${{ env.ssh-private-key != '' }}
+        with:
+          ssh-private-key: ${{ secrets.ssh-private-key }}
       # We support a specific Python version as arg or reading it from
-      # the .python-version file
+      # the .python-version file. If there is not a .python-version file
+      # it will pick the first Python version allowed by looking at the
+      # `requires-python` field of the `pyproject.toml` file.
       - name: Install uv and Python
         if: ${{ inputs.python-version != '' }}
         uses: astral-sh/setup-uv@v6
