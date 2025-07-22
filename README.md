@@ -1,6 +1,18 @@
 # Github Actions
 
-Use these workflows in another repository:
+## Usage
+
+These workflows can be used in the Github Actions of other repositories.
+
+Simplest example. Python version is read from `.python-version` file and `uv` is set to the latest version:
+
+```{yaml}
+jobs:
+  pytest:
+    uses: Komorebi-AI/github-actions/.github/workflows/pytest-uv.yml@main
+```
+
+More complex example, passing arguments:
 
 ```{yaml}
 jobs:
@@ -19,7 +31,7 @@ jobs:
 ```
 
 See other usage examples in the [Komorebi-AI/python-template](https://github.com/Komorebi-AI/python-template) repository:
- 
+
 - [pre-commit-main.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/pre-commit-main.yml)
 - [pre-commit-pr.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/pre-commit-pr.yml)
 - [pytest.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/pytest.yml)
@@ -37,7 +49,7 @@ Secrets are also optional:
 
 To pass all secrets to called workflow use `secrets: inherit`.
 
-## Documentation
+## References
 
 - [Avoiding duplication](https://docs.github.com/en/actions/concepts/workflows-and-actions/avoiding-duplication)
 - [Reuse workflows](https://docs.github.com/en/actions/how-tos/sharing-automations/reuse-workflows)
