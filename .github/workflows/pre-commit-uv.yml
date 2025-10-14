@@ -48,7 +48,7 @@ jobs:
       # `requires-python` field of the `pyproject.toml` file.
       - name: Install uv and Python
         if: ${{ inputs.python-version != '' }}
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           version: ${{ inputs.uv-version }}
           enable-cache: true
@@ -56,7 +56,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
       - name: Install uv and Python using .python-version
         if: ${{ inputs.python-version == '' }}
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           version: ${{ inputs.uv-version }}
           enable-cache: true

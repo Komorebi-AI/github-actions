@@ -40,7 +40,7 @@ jobs:
       # the .python-version file
       - name: Install uv and Python
         if: ${{ inputs.python-version != '' }}
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           version: ${{ inputs.uv-version }}
           enable-cache: true
@@ -48,14 +48,14 @@ jobs:
           python-version: ${{ inputs.python-version }}
       - name: Install uv and Python using .python-version
         if: ${{ inputs.python-version == '' }}
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           version: ${{ inputs.uv-version }}
           enable-cache: true
           cache-dependency-glob: uv.lock
       # Alternative, sometimes faster due to Github caching the Python version
       # - name: "Set up Python"
-      #   uses: actions/setup-python@v5
+      #   uses: actions/setup-python@v6
       #   with:
       #     python-version-file: ".python-version" OR python-version: ${{ inputs.python-version }}
       - name: Install the project
