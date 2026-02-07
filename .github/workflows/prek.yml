@@ -1,0 +1,67 @@
+name: prek
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        required: false
+        type: string
+        default: ''
+      uv-version:
+        required: false
+        type: string
+        default: latest
+      prek-args:
+        required: false
+        type: string
+        default: ''
+      debug-enabled:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      ssh-private-key:
+        required: false
+
+jobs:
+  prek:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # required to grab the history of the PR for prek
+          fetch-depth: 0
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ inputs.debug-enabled }}
+        with:
+          detached: true
+      - uses: webfactory/ssh-agent@v0.9.1
+        env:
+          ssh-private-key: ${{ secrets.ssh-private-key }}
+        if: ${{ env.ssh-private-key != '' }}
+        with:
+          ssh-private-key: ${{ secrets.ssh-private-key }}
+      # We support a specific Python version as arg or reading it from
+      # the .python-version file. If there is not a .python-version file
+      # it will pick the first Python version allowed by looking at the
+      # `requires-python` field of the `pyproject.toml` file.
+      - name: Install uv and Python
+        if: ${{ inputs.python-version != '' }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ inputs.uv-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: ${{ inputs.python-version }}
+      - name: Install uv and Python using .python-version
+        if: ${{ inputs.python-version == '' }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ inputs.uv-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install the project
+        run: uv sync --locked --dev --all-extras
+      - name: Run prek
+        run: uv run prek run --all-files ${{ inputs.prek-args }}
