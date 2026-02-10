@@ -14,7 +14,7 @@ on:
       prek-args:
         required: false
         type: string
-        default: ''
+        default: '--all-files'
       debug-enabled:
         required: false
         type: boolean
@@ -64,4 +64,6 @@ jobs:
       - name: Install the project
         run: uv sync --locked --dev --all-extras
       - name: Run prek
-        run: uv run prek run --all-files ${{ inputs.prek-args }}
+        uses: j178/prek-action@v1
+        with:
+          extra-args: ${{ inputs.prek-args }}
