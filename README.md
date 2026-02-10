@@ -1,12 +1,26 @@
 # Github Actions
 
-## Usage
+Reusable Github Actions workflows for Python projects.
 
-These workflows can be used in the Github Actions of other repositories.
+## Workflows
+
+### pytest-uv
+
+Runs tests with pytest using uv.
+
+### pre-commit-uv
+
+Runs pre-commit hooks using uv and [pre-commit-uv](https://github.com/tox-dev/pre-commit-uv).
+
+### prek
+
+Runs [prek](https://github.com/j178/prek) hooks using the [prek-action](https://github.com/j178/prek-action). prek is a fast, Rust-based drop-in replacement for pre-commit.
+
+## Usage
 
 Simplest example. Python version is read from `.python-version` file and `uv` is set to the latest version:
 
-```{yaml}
+```yaml
 jobs:
   pytest:
     uses: Komorebi-AI/github-actions/.github/workflows/pytest-uv.yml@main
@@ -14,7 +28,7 @@ jobs:
 
 More complex example, passing arguments:
 
-```{yaml}
+```yaml
 jobs:
   pytest:
     strategy:
@@ -30,17 +44,31 @@ jobs:
       ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 ```
 
+prek example. By default runs hooks on all files (`--all-files`). To run only on changed files in a PR, pass `--from-ref` and `--to-ref` via `prek-args`:
+
+```yaml
+jobs:
+  prek:
+    uses: Komorebi-AI/github-actions/.github/workflows/prek.yml@main
+    with:
+      prek-args: --from-ref ${{ github.event.pull_request.base.sha }} --to-ref ${{ github.event.pull_request.head.sha }}
+```
+
 See other usage examples in the [Komorebi-AI/python-template](https://github.com/Komorebi-AI/python-template) repository:
 
-- [pre-commit-main.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/pre-commit-main.yml)
-- [pre-commit-pr.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/pre-commit-pr.yml)
+- [prek-main.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/prek-main.yml)
+- [prek-pr.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/prek-pr.yml)
 - [pytest.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/pytest.yml)
 
-All arguments are optional, these are the default values:
+## Common inputs
+
+All inputs are optional, these are the default values:
 
 - `uv-version`: use latest version
 - `python-version`: look at `.python-version` or `pyproject.toml` file
 - `debug-enabled`: false
+
+## Secrets
 
 Secrets are also optional:
 
