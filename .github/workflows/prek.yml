@@ -64,6 +64,6 @@ jobs:
       - name: Install the project
         run: uv sync --locked --dev --all-extras
       - name: Run prek
-        uses: j178/prek-action@v1
+        uses: j178/prek-action@v2
         with:
           extra-args: ${{ inputs.prek-args }}
