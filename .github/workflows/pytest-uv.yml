@@ -24,13 +24,13 @@ jobs:
   pytest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup tmate session
         uses: mxschmitt/action-tmate@v3
         if: ${{ inputs.debug-enabled }}
         with:
           detached: true
-      - uses: webfactory/ssh-agent@v0.9.1
+      - uses: webfactory/ssh-agent@v0.10.0
         env: 
             ssh-private-key: ${{ secrets.ssh-private-key }}
         if: ${{ env.ssh-private-key != '' }}
@@ -65,7 +65,7 @@ jobs:
         run: |
           uv run pytest
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         env: 
             codecov-token: ${{ secrets.codecov-token }}
         if: ${{ env.codecov-token != '' }}
