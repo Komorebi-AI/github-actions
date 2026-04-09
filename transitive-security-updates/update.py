@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -43,6 +44,42 @@ def git(*args: str) -> str:
 def parse_version(v: str) -> tuple[int, ...]:
     """Best-effort parse of a PEP 440-ish version into a comparable tuple."""
     return tuple(int(x) for x in re.findall(r"\d+", v))
+
+
+def normalize_name(name: str) -> str:
+    """PEP 503 normalize a package name for comparison."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def get_direct_dependencies(pyproject_path: Path) -> set[str]:
+    """Extract direct dependency names from pyproject.toml (normalized)."""
+    if not pyproject_path.exists():
+        return set()
+
+    with open(pyproject_path, "rb") as f:
+        data = tomllib.load(f)
+
+    direct: set[str] = set()
+
+    # [project.dependencies]
+    for dep in data.get("project", {}).get("dependencies", []):
+        name = re.split(r"[>=<!\[;@\s]", dep)[0].strip()
+        direct.add(normalize_name(name))
+
+    # [project.optional-dependencies]
+    for group_deps in data.get("project", {}).get("optional-dependencies", {}).values():
+        for dep in group_deps:
+            name = re.split(r"[>=<!\[;@\s]", dep)[0].strip()
+            direct.add(normalize_name(name))
+
+    # [dependency-groups] (uv / PEP 735)
+    for group_deps in data.get("dependency-groups", {}).values():
+        for dep in group_deps:
+            if isinstance(dep, str):
+                name = re.split(r"[>=<!\[;@\s]", dep)[0].strip()
+                direct.add(normalize_name(name))
+
+    return direct
 
 
 # ---------------------------------------------------------------------------
@@ -150,17 +187,43 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
 # PR body
 # ---------------------------------------------------------------------------
 
+def _render_upgraded_table(rows: list[str]) -> list[str]:
+    if not rows:
+        return ["No packages were upgraded."]
+    return [
+        "| Package | Version | Vulnerabilities |",
+        "|---|---|---|",
+        *rows,
+    ]
+
+
+def _render_not_upgraded_table(rows: list[str]) -> list[str]:
+    if not rows:
+        return ["All vulnerabilities were fixed."]
+    return [
+        "| Package | Current | Needs | Vulnerabilities |",
+        "|---|---|---|---|",
+        *rows,
+    ]
+
+
 def build_pr_body(
     packages: list[VulnerablePackage],
     versions: dict[str, tuple[str, str]],
+    direct_deps: set[str],
 ) -> str:
-    """Build a markdown PR body with Upgraded / Not upgraded sections."""
-    upgraded_rows: list[str] = []
-    not_upgraded_rows: list[str] = []
+    """Build a markdown PR body with Upgraded / Not upgraded sections,
+    each split into Direct / Transitive sub-tables."""
+    upgraded_direct: list[str] = []
+    upgraded_transitive: list[str] = []
+    not_upgraded_direct: list[str] = []
+    not_upgraded_transitive: list[str] = []
 
     for pkg in packages:
         before, after = versions[pkg.name]
         advisories = "<br>".join(f"• {a}" for a in pkg.advisories)
+        is_direct = normalize_name(pkg.name) in direct_deps
+        label = "direct" if is_direct else "transitive"
 
         is_fixed = (
             after != "unknown"
@@ -168,32 +231,32 @@ def build_pr_body(
         )
 
         if is_fixed:
-            upgraded_rows.append(f"| {pkg.name} | {before} → {after} | {advisories} |")
-            print(f"  ✅ {pkg.name} {before} → {after}")
+            row = f"| {pkg.name} | {before} → {after} | {advisories} |"
+            (upgraded_direct if is_direct else upgraded_transitive).append(row)
+            print(f"  ✅ {pkg.name} ({label}) {before} → {after}")
         else:
             current = f"{before} → {after}" if before != after and after != "unknown" else before
-            not_upgraded_rows.append(f"| {pkg.name} | {current} | {pkg.fixed} | {advisories} |")
-            print(f"  ⚠️  {pkg.name} stuck at {after} — needs {pkg.fixed}")
+            row = f"| {pkg.name} | {current} | {pkg.fixed} | {advisories} |"
+            (not_upgraded_direct if is_direct else not_upgraded_transitive).append(row)
+            print(f"  ⚠️  {pkg.name} ({label}) stuck at {after} — needs {pkg.fixed}")
 
-    sections: list[str] = ["## Upgraded\n"]
-    if upgraded_rows:
-        sections.append("| Package | Version | Vulnerabilities |")
-        sections.append("|---|---|---|")
-        sections.extend(upgraded_rows)
-    else:
-        sections.append("No packages were upgraded.")
+    sections: list[str] = []
+
+    sections.append("## Upgraded\n")
+    sections.append("### Direct dependencies\n")
+    sections.extend(_render_upgraded_table(upgraded_direct))
+    sections.append("\n### Transitive dependencies\n")
+    sections.extend(_render_upgraded_table(upgraded_transitive))
 
     sections.append("\n## Not upgraded\n")
     sections.append(
         "These vulnerabilities could not be fixed because the package "
         "is constrained by a parent dependency.\n"
     )
-    if not_upgraded_rows:
-        sections.append("| Package | Current | Needs | Vulnerabilities |")
-        sections.append("|---|---|---|---|")
-        sections.extend(not_upgraded_rows)
-    else:
-        sections.append("All vulnerabilities were fixed.")
+    sections.append("### Direct dependencies\n")
+    sections.extend(_render_not_upgraded_table(not_upgraded_direct))
+    sections.append("\n### Transitive dependencies\n")
+    sections.extend(_render_not_upgraded_table(not_upgraded_transitive))
 
     return "\n".join(sections)
 
@@ -243,6 +306,7 @@ def main() -> None:
     branch_name = os.environ.get("INPUT_BRANCH_NAME", "security/transitive-updates")
     pr_title = os.environ.get("INPUT_PR_TITLE", "Security: upgrade vulnerable transitive dependencies")
     lockfile = Path("uv.lock")
+    pyproject = Path("pyproject.toml")
 
     packages = fetch_alerts(repo)
     print(f"Packages with open alerts: {len(packages)}")
@@ -251,8 +315,9 @@ def main() -> None:
         print("No open alerts — nothing to do.")
         return
 
+    direct_deps = get_direct_dependencies(pyproject)
     versions = upgrade_packages(packages, lockfile)
-    pr_body = build_pr_body(packages, versions)
+    pr_body = build_pr_body(packages, versions, direct_deps)
     create_or_update_pr(pr_body, branch_name, pr_title)
 
 

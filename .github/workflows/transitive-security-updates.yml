@@ -87,6 +87,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.token }}
 
+      - name: Extract direct dependencies from pyproject.toml
+        if: env.skip != 'true'
+        run: |
+          python3 -c "
+          import tomllib, re, pathlib
+          data = tomllib.loads(pathlib.Path('pyproject.toml').read_text()) if pathlib.Path('pyproject.toml').exists() else {}
+          deps = set()
+          for d in data.get('project', {}).get('dependencies', []):
+              deps.add(re.sub(r'[-_.]+', '-', re.split(r'[>=<!\[;@\s]', d)[0].strip()).lower())
+          for group in data.get('project', {}).get('optional-dependencies', {}).values():
+              for d in group:
+                  deps.add(re.sub(r'[-_.]+', '-', re.split(r'[>=<!\[;@\s]', d)[0].strip()).lower())
+          for group in data.get('dependency-groups', {}).values():
+              for d in group:
+                  if isinstance(d, str):
+                      deps.add(re.sub(r'[-_.]+', '-', re.split(r'[>=<!\[;@\s]', d)[0].strip()).lower())
+          print('\n'.join(sorted(deps)))
+          " > /tmp/direct_deps.txt
+
       - name: Save current versions and attempt upgrades
         if: env.skip != 'true'
         run: |
@@ -110,9 +129,18 @@ jobs:
             exit 0
           fi
 
-          # Build PR body grouped by package
-          fixed_rows=""
-          unfixed_rows=""
+          # Build PR body grouped by package, split by direct vs transitive
+          fixed_direct=""
+          fixed_transitive=""
+          unfixed_direct=""
+          unfixed_transitive=""
+
+          # Helper: normalize package name (PEP 503) and check if direct
+          is_direct() {
+            local normalized
+            normalized=$(echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[-_.]\+/-/g')
+            grep -qx "$normalized" /tmp/direct_deps.txt 2>/dev/null
+          }
 
           for row in $(jq -r '.[] | @base64' /tmp/grouped.json); do
             _jq() { echo "$row" | base64 --decode | jq -r "$1"; }
@@ -120,40 +148,61 @@ jobs:
             fix_version=$(_jq '.fixed')
             advisories=$(_jq '.advisories | map("• " + .) | join("<br>")')
 
+            if is_direct "$pkg"; then
+              label="direct"
+            else
+              label="transitive"
+            fi
+
             before=$(grep -i "^$pkg=" /tmp/before_versions.txt | head -1 | cut -d= -f2)
             after=$(grep -iA1 "name = \"$pkg\"" uv.lock | grep version | grep -oP '"\K[^"]+' || echo "unknown")
 
             if [[ "$after" != "unknown" ]] && [[ "$(printf '%s\n' "$fix_version" "$after" | sort -V | head -1)" == "$fix_version" ]]; then
-              fixed_rows+="| $pkg | $before → $after | $advisories |\n"
-              echo "✅ $pkg $before → $after"
+              row="| $pkg | $before → $after | $advisories |\n"
+              if [[ "$label" == "direct" ]]; then fixed_direct+="$row"; else fixed_transitive+="$row"; fi
+              echo "✅ $pkg ($label) $before → $after"
             else
               if [[ "$before" != "$after" && "$after" != "unknown" ]]; then
-                unfixed_rows+="| $pkg | $before → $after | $fix_version | $advisories |\n"
+                row="| $pkg | $before → $after | $fix_version | $advisories |\n"
               else
-                unfixed_rows+="| $pkg | $before | $fix_version | $advisories |\n"
+                row="| $pkg | $before | $fix_version | $advisories |\n"
               fi
-              echo "⚠️  $pkg stuck at $after — needs $fix_version"
+              if [[ "$label" == "direct" ]]; then unfixed_direct+="$row"; else unfixed_transitive+="$row"; fi
+              echo "⚠️  $pkg ($label) stuck at $after — needs $fix_version"
             fi
           done
 
-          pr_body="## Upgraded\n\n"
-          if [[ -n "$fixed_rows" ]]; then
-            pr_body+="| Package | Version | Vulnerabilities |\n"
-            pr_body+="|---|---|---|\n"
-            pr_body+="$fixed_rows"
-          else
-            pr_body+="No packages were upgraded.\n"
-          fi
+          # Helper: render an upgraded table or fallback message
+          upgraded_table() {
+            local rows="$1"
+            if [[ -n "$rows" ]]; then
+              echo "| Package | Version | Vulnerabilities |\n|---|---|---|\n$rows"
+            else
+              echo "No packages were upgraded.\n"
+            fi
+          }
 
+          # Helper: render a not-upgraded table or fallback message
+          not_upgraded_table() {
+            local rows="$1"
+            if [[ -n "$rows" ]]; then
+              echo "| Package | Current | Needs | Vulnerabilities |\n|---|---|---|---|\n$rows"
+            else
+              echo "All vulnerabilities were fixed.\n"
+            fi
+          }
+
+          pr_body="## Upgraded\n\n"
+          pr_body+="### Direct dependencies\n\n"
+          pr_body+="$(upgraded_table "$fixed_direct")\n"
+          pr_body+="\n### Transitive dependencies\n\n"
+          pr_body+="$(upgraded_table "$fixed_transitive")\n"
           pr_body+="\n## Not upgraded\n\n"
           pr_body+="These vulnerabilities could not be fixed because the package is constrained by a parent dependency.\n\n"
-          if [[ -n "$unfixed_rows" ]]; then
-            pr_body+="| Package | Current | Needs | Vulnerabilities |\n"
-            pr_body+="|---|---|---|---|\n"
-            pr_body+="$unfixed_rows"
-          else
-            pr_body+="All vulnerabilities were fixed.\n"
-          fi
+          pr_body+="### Direct dependencies\n\n"
+          pr_body+="$(not_upgraded_table "$unfixed_direct")\n"
+          pr_body+="\n### Transitive dependencies\n\n"
+          pr_body+="$(not_upgraded_table "$unfixed_transitive")\n"
 
           # Render the body (interpret \n)
           pr_body=$(echo -e "$pr_body")
