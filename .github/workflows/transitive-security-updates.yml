@@ -132,8 +132,7 @@ jobs:
           # Build PR body grouped by package, split by direct vs transitive
           fixed_direct=""
           fixed_transitive=""
-          unfixed_direct=""
-          unfixed_transitive=""
+          unfixed_rows=""
 
           # Helper: normalize package name (PEP 503) and check if direct
           is_direct() {
@@ -167,7 +166,7 @@ jobs:
               else
                 row="| $pkg | $before | $fix_version | $advisories |\n"
               fi
-              if [[ "$label" == "direct" ]]; then unfixed_direct+="$row"; else unfixed_transitive+="$row"; fi
+              unfixed_rows+="$row"
               echo "⚠️  $pkg ($label) stuck at $after — needs $fix_version"
             fi
           done
@@ -199,10 +198,7 @@ jobs:
           pr_body+="$(upgraded_table "$fixed_transitive")\n"
           pr_body+="\n## Not upgraded\n\n"
           pr_body+="These vulnerabilities could not be fixed because the package is constrained by a parent dependency.\n\n"
-          pr_body+="### Direct dependencies\n\n"
-          pr_body+="$(not_upgraded_table "$unfixed_direct")\n"
-          pr_body+="\n### Transitive dependencies\n\n"
-          pr_body+="$(not_upgraded_table "$unfixed_transitive")\n"
+          pr_body+="$(not_upgraded_table "$unfixed_rows")\n"
 
           # Render the body (interpret \n)
           pr_body=$(echo -e "$pr_body")

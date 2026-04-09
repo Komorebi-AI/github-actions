@@ -216,8 +216,7 @@ def build_pr_body(
     each split into Direct / Transitive sub-tables."""
     upgraded_direct: list[str] = []
     upgraded_transitive: list[str] = []
-    not_upgraded_direct: list[str] = []
-    not_upgraded_transitive: list[str] = []
+    not_upgraded_rows: list[str] = []
 
     for pkg in packages:
         before, after = versions[pkg.name]
@@ -236,8 +235,7 @@ def build_pr_body(
             print(f"  ✅ {pkg.name} ({label}) {before} → {after}")
         else:
             current = f"{before} → {after}" if before != after and after != "unknown" else before
-            row = f"| {pkg.name} | {current} | {pkg.fixed} | {advisories} |"
-            (not_upgraded_direct if is_direct else not_upgraded_transitive).append(row)
+            not_upgraded_rows.append(f"| {pkg.name} | {current} | {pkg.fixed} | {advisories} |")
             print(f"  ⚠️  {pkg.name} ({label}) stuck at {after} — needs {pkg.fixed}")
 
     sections: list[str] = []
@@ -253,10 +251,7 @@ def build_pr_body(
         "These vulnerabilities could not be fixed because the package "
         "is constrained by a parent dependency.\n"
     )
-    sections.append("### Direct dependencies\n")
-    sections.extend(_render_not_upgraded_table(not_upgraded_direct))
-    sections.append("\n### Transitive dependencies\n")
-    sections.extend(_render_not_upgraded_table(not_upgraded_transitive))
+    sections.extend(_render_not_upgraded_table(not_upgraded_rows))
 
     return "\n".join(sections)
 
