@@ -1,6 +1,6 @@
 # Github Actions
 
-Reusable Github Actions workflows for Python projects.
+Reusable Github Actions workflows and composite actions for Python projects.
 
 ## Workflows
 
@@ -16,13 +16,19 @@ Runs pre-commit hooks using uv and [pre-commit-uv](https://github.com/tox-dev/pr
 
 Runs [prek](https://github.com/j178/prek) hooks using the [prek-action](https://github.com/j178/prek-action). prek is a fast, Rust-based drop-in replacement for pre-commit.
 
-### transitive-security-updates
+### transitive-security-updates (reusable workflow)
 
 Automatically upgrades vulnerable transitive dependencies in `uv.lock`. Fills the gap left by tools like Renovate, which can only bump direct dependencies declared in `pyproject.toml`. This workflow reads GitHub Dependabot alerts and runs `uv lock --upgrade-package` for each vulnerable package, then opens (or updates) a single PR with a detailed description of what was upgraded and what couldn't be.
 
 **Prerequisites:**
 - [Dependabot alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/about-dependabot-alerts) must be enabled on the calling repository
 - A GitHub PAT (classic) with `repo` scope is required (the default `GITHUB_TOKEN` cannot read Dependabot alerts)
+
+## Actions
+
+### transitive-security-updates (composite action)
+
+Same functionality as the reusable workflow above, but implemented as a [composite action](https://docs.github.com/en/actions/sharing-automations/creating-actions/creating-a-composite-action) with a standalone Python script. Use this if you prefer step-level composition over job-level reuse.
 
 ## Usage
 
@@ -93,6 +99,32 @@ jobs:
     secrets:
       token: ${{ secrets.RENOVATE_TOKEN }}
       ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+```
+
+Transitive security updates as a composite action. The caller defines the job and checkout, and uses the action at the step level:
+
+```yaml
+name: Transitive Security Updates
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RENOVATE_TOKEN }}
+      - uses: Komorebi-AI/github-actions/transitive-security-updates@main
+        with:
+          token: ${{ secrets.RENOVATE_TOKEN }}
 ```
 
 See other usage examples in the [Komorebi-AI/python-template](https://github.com/Komorebi-AI/python-template) repository:

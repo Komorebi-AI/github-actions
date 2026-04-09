@@ -1,0 +1,32 @@
+name: Transitive Security Updates
+description: >
+  Upgrade vulnerable transitive dependencies in uv.lock by reading
+  Dependabot alerts and running uv lock --upgrade-package for each
+  affected package. Opens or updates a single PR with details.
+
+inputs:
+  token:
+    description: >
+      GitHub PAT (classic) with repo scope. Required because the default
+      GITHUB_TOKEN cannot read Dependabot alerts.
+    required: true
+  branch-name:
+    description: Branch name for the PR
+    required: false
+    default: security/transitive-updates
+  pr-title:
+    description: Title for the PR
+    required: false
+    default: "Security: upgrade vulnerable transitive dependencies"
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v7
+    - name: Run transitive security updates
+      shell: bash
+      run: python "${{ github.action_path }}/update.py"
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        INPUT_BRANCH_NAME: ${{ inputs.branch-name }}
+        INPUT_PR_TITLE: ${{ inputs.pr-title }}
