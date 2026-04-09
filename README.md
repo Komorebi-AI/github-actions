@@ -16,9 +16,9 @@ Runs pre-commit hooks using uv and [pre-commit-uv](https://github.com/tox-dev/pr
 
 Runs [prek](https://github.com/j178/prek) hooks using the [prek-action](https://github.com/j178/prek-action). prek is a fast, Rust-based drop-in replacement for pre-commit.
 
-### transitive-security-updates (reusable workflow)
+### security-update (reusable workflow)
 
-Automatically upgrades vulnerable transitive dependencies in `uv.lock`. Fills the gap left by tools like Renovate, which can only bump direct dependencies declared in `pyproject.toml`. This workflow reads GitHub Dependabot alerts and runs `uv lock --upgrade-package` for each vulnerable package, then opens (or updates) a single PR with a detailed description of what was upgraded and what couldn't be.
+Automatically upgrades vulnerable dependencies (direct and transitive) in `uv.lock`. Complements tools like Renovate, which can only bump direct dependencies declared in `pyproject.toml`. This workflow reads GitHub Dependabot alerts and runs `uv lock --upgrade-package` for each vulnerable package, then opens (or updates) a single PR with a detailed description of what was upgraded and what couldn't be.
 
 **Prerequisites:**
 - [Dependabot alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/about-dependabot-alerts) must be enabled on the calling repository
@@ -26,7 +26,7 @@ Automatically upgrades vulnerable transitive dependencies in `uv.lock`. Fills th
 
 ## Actions
 
-### transitive-security-updates (composite action)
+### security-update (composite action)
 
 Same functionality as the reusable workflow above, but implemented as a [composite action](https://docs.github.com/en/actions/sharing-automations/creating-actions/creating-a-composite-action) with a standalone Python script. Use this if you prefer step-level composition over job-level reuse.
 
@@ -68,10 +68,10 @@ jobs:
       prek-args: --from-ref ${{ github.event.pull_request.base.sha }} --to-ref ${{ github.event.pull_request.head.sha }}
 ```
 
-Transitive security updates example. The calling workflow provides the schedule and triggers, and passes a PAT with `repo` scope:
+Security update example. The calling workflow provides the schedule and triggers, and passes a PAT with `repo` scope:
 
 ```yaml
-name: Transitive Security Updates
+name: Security Update
 
 on:
   schedule:
@@ -80,7 +80,7 @@ on:
 
 jobs:
   security:
-    uses: Komorebi-AI/github-actions/.github/workflows/transitive-security-updates.yml@main
+    uses: Komorebi-AI/github-actions/.github/workflows/security-update.yml@main
     secrets:
       token: ${{ secrets.RENOVATE_TOKEN }}
 ```
@@ -90,21 +90,21 @@ With all options:
 ```yaml
 jobs:
   security:
-    uses: Komorebi-AI/github-actions/.github/workflows/transitive-security-updates.yml@main
+    uses: Komorebi-AI/github-actions/.github/workflows/security-update.yml@main
     with:
       uv-version: 0.8.0
-      branch-name: security/transitive-updates
-      pr-title: "Security: upgrade vulnerable transitive dependencies"
+      branch-name: security/dependency-updates
+      pr-title: "Security: upgrade vulnerable dependencies"
       debug-enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
     secrets:
       token: ${{ secrets.RENOVATE_TOKEN }}
       ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 ```
 
-Transitive security updates as a composite action. The caller defines the job and checkout, and uses the action at the step level:
+Security update as a composite action. The caller defines the job and checkout, and uses the action at the step level:
 
 ```yaml
-name: Transitive Security Updates
+name: Security Update
 
 on:
   schedule:
@@ -122,7 +122,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.RENOVATE_TOKEN }}
-      - uses: Komorebi-AI/github-actions/transitive-security-updates@main
+      - uses: Komorebi-AI/github-actions/security-update@main
         with:
           token: ${{ secrets.RENOVATE_TOKEN }}
 ```
@@ -147,7 +147,7 @@ Secrets are also optional:
 
 - if `codecov-token` is set coverage will be computed and uploaded to Codecov
 - if `ssh-private-key` is set dependencies can be installed from Github repositories inside the Komorebi-AI organization using SSH (via the [ssh-agent](https://github.com/webfactory/ssh-agent) Github Action)
-- `token` is **required** for `transitive-security-updates` — a GitHub PAT (classic) with `repo` scope, used to read Dependabot alerts, push branches, and create/update PRs
+- `token` is **required** for `security-update` — a GitHub PAT (classic) with `repo` scope, used to read Dependabot alerts, push branches, and create/update PRs
 
 To pass all secrets to called workflow use `secrets: inherit`.
 

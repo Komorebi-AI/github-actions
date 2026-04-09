@@ -1,4 +1,4 @@
-"""Upgrade vulnerable transitive dependencies in uv.lock.
+"""Upgrade vulnerable dependencies (direct and transitive) in uv.lock.
 
 Reads open Dependabot alerts for the pip ecosystem, runs
 ``uv lock --upgrade-package`` for each affected package, and opens
@@ -212,11 +212,10 @@ def build_pr_body(
     versions: dict[str, tuple[str, str]],
     direct_deps: set[str],
 ) -> str:
-    """Build a markdown PR body with Upgraded / Not upgraded sections,
-    each split into Direct / Transitive sub-tables."""
-    upgraded_direct: list[str] = []
+    """Build a markdown PR body grouped by Direct / Transitive."""
+    direct_rows: list[str] = []
     upgraded_transitive: list[str] = []
-    not_upgraded_rows: list[str] = []
+    not_upgraded_transitive: list[str] = []
 
     for pkg in packages:
         before, after = versions[pkg.name]
@@ -231,27 +230,34 @@ def build_pr_body(
 
         if is_fixed:
             row = f"| {pkg.name} | {before} → {after} | {advisories} |"
-            (upgraded_direct if is_direct else upgraded_transitive).append(row)
+            if is_direct:
+                direct_rows.append(row)
+            else:
+                upgraded_transitive.append(row)
             print(f"  ✅ {pkg.name} ({label}) {before} → {after}")
         else:
             current = f"{before} → {after}" if before != after and after != "unknown" else before
-            not_upgraded_rows.append(f"| {pkg.name} | {current} | {pkg.fixed} | {advisories} |")
+            row = f"| {pkg.name} | {current} | {pkg.fixed} | {advisories} |"
+            if is_direct:
+                direct_rows.append(row)
+            else:
+                not_upgraded_transitive.append(row)
             print(f"  ⚠️  {pkg.name} ({label}) stuck at {after} — needs {pkg.fixed}")
 
     sections: list[str] = []
 
-    sections.append("## Upgraded\n")
-    sections.append("### Direct dependencies\n")
-    sections.extend(_render_upgraded_table(upgraded_direct))
-    sections.append("\n### Transitive dependencies\n")
-    sections.extend(_render_upgraded_table(upgraded_transitive))
+    sections.append("## Direct dependencies\n")
+    sections.extend(_render_upgraded_table(direct_rows))
 
-    sections.append("\n## Not upgraded\n")
+    sections.append("\n## Transitive dependencies\n")
+    sections.append("### Upgraded\n")
+    sections.extend(_render_upgraded_table(upgraded_transitive))
+    sections.append("\n### Not upgraded\n")
     sections.append(
         "These vulnerabilities could not be fixed because the package "
         "is constrained by a parent dependency.\n"
     )
-    sections.extend(_render_not_upgraded_table(not_upgraded_rows))
+    sections.extend(_render_not_upgraded_table(not_upgraded_transitive))
 
     return "\n".join(sections)
 
@@ -281,7 +287,7 @@ def create_or_update_pr(pr_body: str, branch_name: str, pr_title: str) -> None:
 
     git("checkout", "-B", branch_name)
     git("add", "uv.lock")
-    git("commit", "-m", "fix: upgrade vulnerable transitive dependencies")
+    git("commit", "-m", "fix: upgrade vulnerable dependencies")
     run(["git", "push", "origin", branch_name, "--force"])
 
     if existing:
@@ -298,8 +304,8 @@ def create_or_update_pr(pr_body: str, branch_name: str, pr_title: str) -> None:
 
 def main() -> None:
     repo = os.environ["GITHUB_REPOSITORY"]
-    branch_name = os.environ.get("INPUT_BRANCH_NAME", "security/transitive-updates")
-    pr_title = os.environ.get("INPUT_PR_TITLE", "Security: upgrade vulnerable transitive dependencies")
+    branch_name = os.environ.get("INPUT_BRANCH_NAME", "security/dependency-updates")
+    pr_title = os.environ.get("INPUT_PR_TITLE", "Security: upgrade vulnerable dependencies")
     lockfile = Path("uv.lock")
     pyproject = Path("pyproject.toml")
 
