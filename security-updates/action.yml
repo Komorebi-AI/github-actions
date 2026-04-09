@@ -17,7 +17,7 @@ inputs:
   pr-title:
     description: Title for the PR
     required: false
-    default: "Security: upgrade vulnerable dependencies"
+    default: "security: upgrade vulnerable dependencies"
 
 runs:
   using: composite
