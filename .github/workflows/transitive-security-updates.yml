@@ -1,0 +1,182 @@
+name: Transitive Security Updates
+
+on:
+  workflow_call:
+    inputs:
+      uv-version:
+        required: false
+        type: string
+        default: latest
+      branch-name:
+        required: false
+        type: string
+        default: security/transitive-updates
+      pr-title:
+        required: false
+        type: string
+        default: "Security: upgrade vulnerable transitive dependencies"
+      debug-enabled:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      token:
+        required: true
+      ssh-private-key:
+        required: false
+
+jobs:
+  fix-transitive-vulns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.token }}
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ inputs.debug-enabled }}
+        with:
+          detached: true
+      - uses: webfactory/ssh-agent@v0.10.0
+        env:
+          ssh-private-key: ${{ secrets.ssh-private-key }}
+        if: ${{ env.ssh-private-key != '' }}
+        with:
+          ssh-private-key: ${{ secrets.ssh-private-key }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ inputs.uv-version }}
+
+      - name: Fetch open Dependabot alerts
+        run: |
+          gh api /repos/${{ github.repository }}/dependabot/alerts \
+            --jq '[.[] | select(.state == "open" and
+                   .dependency.package.ecosystem == "pip") |
+                   {
+                     name: .dependency.package.name,
+                     fixed: .security_vulnerability.first_patched_version.identifier,
+                     ghsa: .security_advisory.ghsa_id,
+                     cve: .security_advisory.cve_id,
+                     summary: .security_advisory.summary,
+                     severity: .security_advisory.severity
+                   }]' \
+            > /tmp/alerts.json
+
+          # Group alerts by package: highest fix version, collect all advisories
+          jq '
+            group_by(.name) | map({
+              name: .[0].name,
+              fixed: (map(.fixed) | sort_by(split(".") | map(tonumber? // 0)) | last),
+              advisories: map(
+                (if .cve != null then
+                  "[" + .cve + "](https://nvd.nist.gov/vuln/detail/" + .cve + ")"
+                else
+                  "[" + .ghsa + "](https://github.com/advisories/" + .ghsa + ")"
+                end) + " (" + .severity + "): " + .summary
+              )
+            })
+          ' /tmp/alerts.json > /tmp/grouped.json
+
+          count=$(jq length /tmp/grouped.json)
+          echo "Packages with open alerts: $count"
+          if [[ "$count" -eq 0 ]]; then
+            echo "No open alerts — nothing to do"
+            echo "skip=true" >> "$GITHUB_ENV"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.token }}
+
+      - name: Save current versions and attempt upgrades
+        if: env.skip != 'true'
+        run: |
+          # Save original versions before upgrading
+          jq -r '.[].name' /tmp/grouped.json | while read pkg; do
+            version=$(grep -iA1 "name = \"$pkg\"" uv.lock | grep version | grep -oP '"\K[^"]+' || echo "unknown")
+            echo "$pkg=$version"
+          done > /tmp/before_versions.txt
+
+          # Run upgrades
+          jq -r '.[].name' /tmp/grouped.json | while read pkg; do
+            echo "Upgrading $pkg..."
+            uv lock --upgrade-package "$pkg"
+          done
+
+      - name: Create or update PR
+        if: env.skip != 'true'
+        run: |
+          if [[ -z "$(git diff uv.lock)" ]]; then
+            echo "No lockfile changes — all packages may be constrained"
+            exit 0
+          fi
+
+          # Build PR body grouped by package
+          fixed_rows=""
+          unfixed_rows=""
+
+          for row in $(jq -r '.[] | @base64' /tmp/grouped.json); do
+            _jq() { echo "$row" | base64 --decode | jq -r "$1"; }
+            pkg=$(_jq '.name')
+            fix_version=$(_jq '.fixed')
+            advisories=$(_jq '.advisories | map("• " + .) | join("<br>")')
+
+            before=$(grep -i "^$pkg=" /tmp/before_versions.txt | head -1 | cut -d= -f2)
+            after=$(grep -iA1 "name = \"$pkg\"" uv.lock | grep version | grep -oP '"\K[^"]+' || echo "unknown")
+
+            if [[ "$after" != "unknown" ]] && [[ "$(printf '%s\n' "$fix_version" "$after" | sort -V | head -1)" == "$fix_version" ]]; then
+              fixed_rows+="| $pkg | $before → $after | $advisories |\n"
+              echo "✅ $pkg $before → $after"
+            else
+              if [[ "$before" != "$after" && "$after" != "unknown" ]]; then
+                unfixed_rows+="| $pkg | $before → $after | $fix_version | $advisories |\n"
+              else
+                unfixed_rows+="| $pkg | $before | $fix_version | $advisories |\n"
+              fi
+              echo "⚠️  $pkg stuck at $after — needs $fix_version"
+            fi
+          done
+
+          pr_body="## Upgraded\n\n"
+          if [[ -n "$fixed_rows" ]]; then
+            pr_body+="| Package | Version | Vulnerabilities |\n"
+            pr_body+="|---|---|---|\n"
+            pr_body+="$fixed_rows"
+          else
+            pr_body+="No packages were upgraded.\n"
+          fi
+
+          pr_body+="\n## Not upgraded\n\n"
+          pr_body+="These vulnerabilities could not be fixed because the package is constrained by a parent dependency.\n\n"
+          if [[ -n "$unfixed_rows" ]]; then
+            pr_body+="| Package | Current | Needs | Vulnerabilities |\n"
+            pr_body+="|---|---|---|---|\n"
+            pr_body+="$unfixed_rows"
+          else
+            pr_body+="All vulnerabilities were fixed.\n"
+          fi
+
+          # Render the body (interpret \n)
+          pr_body=$(echo -e "$pr_body")
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Check if PR already exists
+          existing_pr=$(gh pr list --head "${{ inputs.branch-name }}" --state open --json number --jq '.[0].number' || echo "")
+
+          # Create or update the branch from current state (uv.lock already modified)
+          git checkout -B "${{ inputs.branch-name }}"
+          git add uv.lock
+          git commit -m "fix: upgrade vulnerable transitive dependencies"
+          git push origin "${{ inputs.branch-name }}" --force
+
+          if [[ -n "$existing_pr" ]]; then
+            gh pr edit "$existing_pr" --body "$pr_body"
+            echo "Updated PR #$existing_pr"
+          else
+            gh pr create \
+              --title "${{ inputs.pr-title }}" \
+              --body "$pr_body"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.token }}

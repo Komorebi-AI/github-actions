@@ -16,6 +16,14 @@ Runs pre-commit hooks using uv and [pre-commit-uv](https://github.com/tox-dev/pr
 
 Runs [prek](https://github.com/j178/prek) hooks using the [prek-action](https://github.com/j178/prek-action). prek is a fast, Rust-based drop-in replacement for pre-commit.
 
+### transitive-security-updates
+
+Automatically upgrades vulnerable transitive dependencies in `uv.lock`. Fills the gap left by tools like Renovate, which can only bump direct dependencies declared in `pyproject.toml`. This workflow reads GitHub Dependabot alerts and runs `uv lock --upgrade-package` for each vulnerable package, then opens (or updates) a single PR with a detailed description of what was upgraded and what couldn't be.
+
+**Prerequisites:**
+- [Dependabot alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/about-dependabot-alerts) must be enabled on the calling repository
+- A GitHub PAT (classic) with `repo` scope is required (the default `GITHUB_TOKEN` cannot read Dependabot alerts)
+
 ## Usage
 
 Simplest example. Python version is read from `.python-version` file and `uv` is set to the latest version:
@@ -54,6 +62,39 @@ jobs:
       prek-args: --from-ref ${{ github.event.pull_request.base.sha }} --to-ref ${{ github.event.pull_request.head.sha }}
 ```
 
+Transitive security updates example. The calling workflow provides the schedule and triggers, and passes a PAT with `repo` scope:
+
+```yaml
+name: Transitive Security Updates
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  security:
+    uses: Komorebi-AI/github-actions/.github/workflows/transitive-security-updates.yml@main
+    secrets:
+      token: ${{ secrets.RENOVATE_TOKEN }}
+```
+
+With all options:
+
+```yaml
+jobs:
+  security:
+    uses: Komorebi-AI/github-actions/.github/workflows/transitive-security-updates.yml@main
+    with:
+      uv-version: 0.8.0
+      branch-name: security/transitive-updates
+      pr-title: "Security: upgrade vulnerable transitive dependencies"
+      debug-enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+    secrets:
+      token: ${{ secrets.RENOVATE_TOKEN }}
+      ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+```
+
 See other usage examples in the [Komorebi-AI/python-template](https://github.com/Komorebi-AI/python-template) repository:
 
 - [prek-main.yml](https://github.com/Komorebi-AI/python-template/blob/main/.github/workflows/prek-main.yml)
@@ -74,6 +115,7 @@ Secrets are also optional:
 
 - if `codecov-token` is set coverage will be computed and uploaded to Codecov
 - if `ssh-private-key` is set dependencies can be installed from Github repositories inside the Komorebi-AI organization using SSH (via the [ssh-agent](https://github.com/webfactory/ssh-agent) Github Action)
+- `token` is **required** for `transitive-security-updates` — a GitHub PAT (classic) with `repo` scope, used to read Dependabot alerts, push branches, and create/update PRs
 
 To pass all secrets to called workflow use `secrets: inherit`.
 
