@@ -1,4 +1,4 @@
-name: Security Update
+name: Security Updates
 description: >
   Upgrade vulnerable dependencies (direct and transitive) in uv.lock
   by reading Dependabot alerts and running uv lock --upgrade-package
@@ -23,7 +23,7 @@ runs:
   using: composite
   steps:
     - uses: astral-sh/setup-uv@v7
-    - name: Run security update
+    - name: Run security updates
       shell: bash
       run: python "${{ github.action_path }}/update.py"
       env:
