@@ -164,12 +164,21 @@ jobs:
             else
               needs="${fix_version}"
               [[ "$needs" == "null" ]] && needs="no fix available"
-              if [[ "$before" != "$after" && "$after" != "unknown" ]]; then
-                row="| $pkg | $before → $after | $needs | $advisories |\n"
+              if [[ "$label" == "direct" ]]; then
+                if [[ "$before" != "$after" && "$after" != "unknown" ]]; then
+                  row="| $pkg | $before → $after (no fix available) | $advisories |\n"
+                else
+                  row="| $pkg | $before (no fix available) | $advisories |\n"
+                fi
+                direct_rows+="$row"
               else
-                row="| $pkg | $before | $needs | $advisories |\n"
+                if [[ "$before" != "$after" && "$after" != "unknown" ]]; then
+                  row="| $pkg | $before → $after | $needs | $advisories |\n"
+                else
+                  row="| $pkg | $before | $needs | $advisories |\n"
+                fi
+                unfixed_transitive+="$row"
               fi
-              if [[ "$label" == "direct" ]]; then direct_rows+="$row"; else unfixed_transitive+="$row"; fi
               echo "⚠️  $pkg ($label) stuck at $after — needs $needs"
             fi
           done

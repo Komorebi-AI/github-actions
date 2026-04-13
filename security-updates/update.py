@@ -243,12 +243,11 @@ def build_pr_body(
         else:
             current = f"{before} → {after}" if before != after and after != "unknown" else before
             needs = pkg.fixed or "no fix available"
-            row = f"| {pkg.name} | {current} | {needs} | {advisories} |"
             if is_direct:
-                direct_rows.append(row)
+                direct_rows.append(f"| {pkg.name} | {current} (no fix available) | {advisories} |")
             else:
-                not_upgraded_transitive.append(row)
-            print(f"  ⚠️  {pkg.name} ({label}) stuck at {after} — needs {pkg.fixed}")
+                not_upgraded_transitive.append(f"| {pkg.name} | {current} | {needs} | {advisories} |")
+            print(f"  ⚠️  {pkg.name} ({label}) stuck at {after} — needs {needs}")
 
     sections: list[str] = []
 
