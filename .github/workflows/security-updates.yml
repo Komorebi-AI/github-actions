@@ -156,18 +156,21 @@ jobs:
             before=$(grep -i "^$pkg=" /tmp/before_versions.txt | head -1 | cut -d= -f2)
             after=$(grep -iA1 "name = \"$pkg\"" uv.lock | grep version | grep -oP '"\K[^"]+' || echo "unknown")
 
-            if [[ "$after" != "unknown" ]] && [[ "$(printf '%s\n' "$fix_version" "$after" | sort -V | head -1)" == "$fix_version" ]]; then
+            # fix_version is "null" (string) when no patched version exists
+            if [[ "$fix_version" != "null" && "$after" != "unknown" ]] && [[ "$(printf '%s\n' "$fix_version" "$after" | sort -V | head -1)" == "$fix_version" ]]; then
               row="| $pkg | $before → $after | $advisories |\n"
               if [[ "$label" == "direct" ]]; then direct_rows+="$row"; else fixed_transitive+="$row"; fi
               echo "✅ $pkg ($label) $before → $after"
             else
+              needs="${fix_version}"
+              [[ "$needs" == "null" ]] && needs="no fix available"
               if [[ "$before" != "$after" && "$after" != "unknown" ]]; then
-                row="| $pkg | $before → $after | $fix_version | $advisories |\n"
+                row="| $pkg | $before → $after | $needs | $advisories |\n"
               else
-                row="| $pkg | $before | $fix_version | $advisories |\n"
+                row="| $pkg | $before | $needs | $advisories |\n"
               fi
               if [[ "$label" == "direct" ]]; then direct_rows+="$row"; else unfixed_transitive+="$row"; fi
-              echo "⚠️  $pkg ($label) stuck at $after — needs $fix_version"
+              echo "⚠️  $pkg ($label) stuck at $after — needs $needs"
             fi
           done
 

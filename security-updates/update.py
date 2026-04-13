@@ -105,7 +105,7 @@ class Advisory:
 @dataclass
 class VulnerablePackage:
     name: str
-    fixed: str  # highest fix version needed
+    fixed: str | None  # highest fix version needed, None if no fix available
     advisories: list[Advisory] = field(default_factory=list)
 
 
@@ -136,6 +136,7 @@ def fetch_alerts(repo: str) -> list[VulnerablePackage]:
     grouped: dict[str, VulnerablePackage] = {}
     for a in alerts:
         name = a["name"]
+        fixed = a.get("fixed")
         advisory = Advisory(
             ghsa=a.get("ghsa"),
             cve=a.get("cve"),
@@ -143,11 +144,14 @@ def fetch_alerts(repo: str) -> list[VulnerablePackage]:
             severity=a["severity"],
         )
         if name not in grouped:
-            grouped[name] = VulnerablePackage(name=name, fixed=a["fixed"])
+            grouped[name] = VulnerablePackage(name=name, fixed=fixed)
         else:
-            # Keep the highest fix version
-            if parse_version(a["fixed"]) > parse_version(grouped[name].fixed):
-                grouped[name].fixed = a["fixed"]
+            # Keep the highest fix version (None means no known fix)
+            if fixed and (
+                grouped[name].fixed is None
+                or parse_version(fixed) > parse_version(grouped[name].fixed)
+            ):
+                grouped[name].fixed = fixed
         grouped[name].advisories.append(advisory)
 
     return list(grouped.values())
@@ -224,7 +228,8 @@ def build_pr_body(
         label = "direct" if is_direct else "transitive"
 
         is_fixed = (
-            after != "unknown"
+            pkg.fixed is not None
+            and after != "unknown"
             and parse_version(after) >= parse_version(pkg.fixed)
         )
 
@@ -237,7 +242,8 @@ def build_pr_body(
             print(f"  ✅ {pkg.name} ({label}) {before} → {after}")
         else:
             current = f"{before} → {after}" if before != after and after != "unknown" else before
-            row = f"| {pkg.name} | {current} | {pkg.fixed} | {advisories} |"
+            needs = pkg.fixed or "no fix available"
+            row = f"| {pkg.name} | {current} | {needs} | {advisories} |"
             if is_direct:
                 direct_rows.append(row)
             else:
