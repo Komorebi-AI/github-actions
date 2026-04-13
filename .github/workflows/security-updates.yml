@@ -134,8 +134,9 @@ jobs:
             exit 0
           fi
 
-          # Build PR body: Direct deps, then Transitive (upgraded / not upgraded)
-          direct_rows=""
+          # Build PR body: Direct deps (upgraded / not upgraded), then Transitive (upgraded / not upgraded)
+          fixed_direct=""
+          unfixed_direct=""
           fixed_transitive=""
           unfixed_transitive=""
 
@@ -179,7 +180,7 @@ jobs:
 
             if [[ "$is_fixed" == "true" ]]; then
               row="| $pkg | $before → $after | $needs | $advisories |\n"
-              if [[ "$label" == "direct" ]]; then direct_rows+="$row"; else fixed_transitive+="$row"; fi
+              if [[ "$label" == "direct" ]]; then fixed_direct+="$row"; else fixed_transitive+="$row"; fi
               echo "✅ $pkg ($label) $before → $after"
             else
               if [[ "$was_upgraded" == "true" ]]; then
@@ -188,7 +189,7 @@ jobs:
                 version="$before"
               fi
               row="| $pkg | $version | $needs | $advisories |\n"
-              if [[ "$label" == "direct" ]]; then direct_rows+="$row"; else unfixed_transitive+="$row"; fi
+              if [[ "$label" == "direct" ]]; then unfixed_direct+="$row"; else unfixed_transitive+="$row"; fi
               echo "⚠️  $pkg ($label) stuck at $after — needs $needs"
             fi
           done
@@ -205,13 +206,19 @@ jobs:
           }
 
           pr_body="## Direct dependencies\n\n"
-          pr_body+="$(render_table "$direct_rows" "No vulnerable direct dependencies.")\n"
+          pr_body+="### Upgraded\n\n"
+          pr_body+="$(render_table "$fixed_direct" "No packages were upgraded.")\n"
+          if [[ -n "$unfixed_direct" ]]; then
+            pr_body+="\n### Not upgraded\n\n"
+            pr_body+="$(render_table "$unfixed_direct")\n"
+          fi
           pr_body+="\n## Transitive dependencies\n\n"
           pr_body+="### Upgraded\n\n"
           pr_body+="$(render_table "$fixed_transitive" "No packages were upgraded.")\n"
-          pr_body+="\n### Not upgraded\n\n"
-          pr_body+="These vulnerabilities could not be fixed because the package is constrained by a parent dependency.\n\n"
-          pr_body+="$(render_table "$unfixed_transitive" "All vulnerabilities were fixed.")\n"
+          if [[ -n "$unfixed_transitive" ]]; then
+            pr_body+="\n### Not upgraded\n\n"
+            pr_body+="$(render_table "$unfixed_transitive")\n"
+          fi
 
           # Render the body (interpret \n)
           pr_body=$(echo -e "$pr_body")

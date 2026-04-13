@@ -214,7 +214,8 @@ def build_pr_body(
     direct_deps: set[str],
 ) -> str:
     """Build a markdown PR body grouped by Direct / Transitive."""
-    direct_rows: list[str] = []
+    upgraded_direct: list[str] = []
+    not_upgraded_direct: list[str] = []
     upgraded_transitive: list[str] = []
     not_upgraded_transitive: list[str] = []
 
@@ -235,34 +236,29 @@ def build_pr_body(
 
         if is_fixed:
             row = f"| {pkg.name} | {before} → {after} | {needs} | {advisories} |"
-            if is_direct:
-                direct_rows.append(row)
-            else:
-                upgraded_transitive.append(row)
+            (upgraded_direct if is_direct else upgraded_transitive).append(row)
             print(f"  ✅ {pkg.name} ({label}) {before} → {after}")
         else:
             version = f"{before} → {after}" if was_upgraded else before
             row = f"| {pkg.name} | {version} | {needs} | {advisories} |"
-            if is_direct:
-                direct_rows.append(row)
-            else:
-                not_upgraded_transitive.append(row)
+            (not_upgraded_direct if is_direct else not_upgraded_transitive).append(row)
             print(f"  ⚠️  {pkg.name} ({label}) stuck at {after} — needs {needs}")
 
     sections: list[str] = []
 
     sections.append("## Direct dependencies\n")
-    sections.extend(_render_table(direct_rows, "No vulnerable direct dependencies."))
+    sections.append("### Upgraded\n")
+    sections.extend(_render_table(upgraded_direct, "No packages were upgraded."))
+    if not_upgraded_direct:
+        sections.append("\n### Not upgraded\n")
+        sections.extend(_render_table(not_upgraded_direct))
 
     sections.append("\n## Transitive dependencies\n")
     sections.append("### Upgraded\n")
     sections.extend(_render_table(upgraded_transitive, "No packages were upgraded."))
-    sections.append("\n### Not upgraded\n")
-    sections.append(
-        "These vulnerabilities could not be fixed because the package "
-        "is constrained by a parent dependency.\n"
-    )
-    sections.extend(_render_table(not_upgraded_transitive, "All vulnerabilities were fixed."))
+    if not_upgraded_transitive:
+        sections.append("\n### Not upgraded\n")
+        sections.extend(_render_table(not_upgraded_transitive))
 
     return "\n".join(sections)
 
