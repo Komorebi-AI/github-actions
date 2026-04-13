@@ -191,21 +191,11 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
 # PR body
 # ---------------------------------------------------------------------------
 
-def _render_upgraded_table(rows: list[str]) -> list[str]:
+def _render_table(rows: list[str], empty_message: str = "None.") -> list[str]:
     if not rows:
-        return ["No packages were upgraded."]
+        return [empty_message]
     return [
-        "| Package | Version | Vulnerabilities |",
-        "|---|---|---|",
-        *rows,
-    ]
-
-
-def _render_not_upgraded_table(rows: list[str]) -> list[str]:
-    if not rows:
-        return ["All vulnerabilities were fixed."]
-    return [
-        "| Package | Current | Needs | Vulnerabilities |",
+        "| Package | Version | Needs | Vulnerabilities |",
         "|---|---|---|---|",
         *rows,
     ]
@@ -233,8 +223,10 @@ def build_pr_body(
             and parse_version(after) >= parse_version(pkg.fixed)
         )
 
+        needs = pkg.fixed or "unknown"
+
         if is_fixed:
-            row = f"| {pkg.name} | {before} → {after} | {advisories} |"
+            row = f"| {pkg.name} | {before} → {after} | {needs} | {advisories} |"
             if is_direct:
                 direct_rows.append(row)
             else:
@@ -242,27 +234,27 @@ def build_pr_body(
             print(f"  ✅ {pkg.name} ({label}) {before} → {after}")
         else:
             current = f"{before} → {after}" if before != after and after != "unknown" else before
-            needs = pkg.fixed or "no fix available"
+            row = f"| {pkg.name} | {current} | {needs} | {advisories} |"
             if is_direct:
-                direct_rows.append(f"| {pkg.name} | {current} (no fix available) | {advisories} |")
+                direct_rows.append(row)
             else:
-                not_upgraded_transitive.append(f"| {pkg.name} | {current} | {needs} | {advisories} |")
+                not_upgraded_transitive.append(row)
             print(f"  ⚠️  {pkg.name} ({label}) stuck at {after} — needs {needs}")
 
     sections: list[str] = []
 
     sections.append("## Direct dependencies\n")
-    sections.extend(_render_upgraded_table(direct_rows))
+    sections.extend(_render_table(direct_rows, "No vulnerable direct dependencies."))
 
     sections.append("\n## Transitive dependencies\n")
     sections.append("### Upgraded\n")
-    sections.extend(_render_upgraded_table(upgraded_transitive))
+    sections.extend(_render_table(upgraded_transitive, "No packages were upgraded."))
     sections.append("\n### Not upgraded\n")
     sections.append(
         "These vulnerabilities could not be fixed because the package "
         "is constrained by a parent dependency.\n"
     )
-    sections.extend(_render_not_upgraded_table(not_upgraded_transitive))
+    sections.extend(_render_table(not_upgraded_transitive, "All vulnerabilities were fixed."))
 
     return "\n".join(sections)
 

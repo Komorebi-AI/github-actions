@@ -157,60 +157,43 @@ jobs:
             after=$(grep -iA1 "name = \"$pkg\"" uv.lock | grep version | grep -oP '"\K[^"]+' || echo "unknown")
 
             # fix_version is "null" (string) when no patched version exists
+            needs="${fix_version}"
+            [[ "$needs" == "null" ]] && needs="unknown"
+
             if [[ "$fix_version" != "null" && "$after" != "unknown" ]] && [[ "$(printf '%s\n' "$fix_version" "$after" | sort -V | head -1)" == "$fix_version" ]]; then
-              row="| $pkg | $before → $after | $advisories |\n"
+              row="| $pkg | $before → $after | $needs | $advisories |\n"
               if [[ "$label" == "direct" ]]; then direct_rows+="$row"; else fixed_transitive+="$row"; fi
               echo "✅ $pkg ($label) $before → $after"
             else
-              needs="${fix_version}"
-              [[ "$needs" == "null" ]] && needs="no fix available"
-              if [[ "$label" == "direct" ]]; then
-                if [[ "$before" != "$after" && "$after" != "unknown" ]]; then
-                  row="| $pkg | $before → $after (no fix available) | $advisories |\n"
-                else
-                  row="| $pkg | $before (no fix available) | $advisories |\n"
-                fi
-                direct_rows+="$row"
+              if [[ "$before" != "$after" && "$after" != "unknown" ]]; then
+                row="| $pkg | $before → $after | $needs | $advisories |\n"
               else
-                if [[ "$before" != "$after" && "$after" != "unknown" ]]; then
-                  row="| $pkg | $before → $after | $needs | $advisories |\n"
-                else
-                  row="| $pkg | $before | $needs | $advisories |\n"
-                fi
-                unfixed_transitive+="$row"
+                row="| $pkg | $before | $needs | $advisories |\n"
               fi
+              if [[ "$label" == "direct" ]]; then direct_rows+="$row"; else unfixed_transitive+="$row"; fi
               echo "⚠️  $pkg ($label) stuck at $after — needs $needs"
             fi
           done
 
-          # Helper: render an upgraded table or fallback message
-          upgraded_table() {
+          # Helper: render a 4-column table or fallback message
+          render_table() {
             local rows="$1"
+            local empty_msg="${2:-None.}"
             if [[ -n "$rows" ]]; then
-              echo "| Package | Version | Vulnerabilities |\n|---|---|---|\n$rows"
+              echo "| Package | Version | Needs | Vulnerabilities |\n|---|---|---|---|\n$rows"
             else
-              echo "No packages were upgraded.\n"
-            fi
-          }
-
-          # Helper: render a not-upgraded table or fallback message
-          not_upgraded_table() {
-            local rows="$1"
-            if [[ -n "$rows" ]]; then
-              echo "| Package | Current | Needs | Vulnerabilities |\n|---|---|---|---|\n$rows"
-            else
-              echo "All vulnerabilities were fixed.\n"
+              echo "$empty_msg\n"
             fi
           }
 
           pr_body="## Direct dependencies\n\n"
-          pr_body+="$(upgraded_table "$direct_rows")\n"
+          pr_body+="$(render_table "$direct_rows" "No vulnerable direct dependencies.")\n"
           pr_body+="\n## Transitive dependencies\n\n"
           pr_body+="### Upgraded\n\n"
-          pr_body+="$(upgraded_table "$fixed_transitive")\n"
+          pr_body+="$(render_table "$fixed_transitive" "No packages were upgraded.")\n"
           pr_body+="\n### Not upgraded\n\n"
           pr_body+="These vulnerabilities could not be fixed because the package is constrained by a parent dependency.\n\n"
-          pr_body+="$(not_upgraded_table "$unfixed_transitive")\n"
+          pr_body+="$(render_table "$unfixed_transitive" "All vulnerabilities were fixed.")\n"
 
           # Render the body (interpret \n)
           pr_body=$(echo -e "$pr_body")
