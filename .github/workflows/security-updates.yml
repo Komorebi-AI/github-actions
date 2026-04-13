@@ -67,7 +67,7 @@ jobs:
           jq '
             group_by(.name) | map({
               name: .[0].name,
-              fixed: (map(.fixed) | sort_by(split(".") | map(tonumber? // 0)) | last),
+              fixed: (map(.fixed | select(. != null)) | sort_by(split(".") | map(tonumber? // 0)) | last),
               advisories: map(
                 (if .cve != null then
                   "[" + .cve + "](https://nvd.nist.gov/vuln/detail/" + .cve + ")"
