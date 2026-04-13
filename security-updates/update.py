@@ -217,13 +217,14 @@ def build_pr_body(
         is_direct = normalize_name(pkg.name) in direct_deps
         label = "direct" if is_direct else "transitive"
 
-        is_fixed = (
-            pkg.fixed is not None
-            and after != "unknown"
-            and parse_version(after) >= parse_version(pkg.fixed)
-        )
-
         needs = pkg.fixed or "unknown"
+        was_upgraded = after != "unknown" and before != after
+
+        # Fixed if: version meets the known fix, OR fix is unknown but we upgraded to latest
+        is_fixed = after != "unknown" and (
+            (pkg.fixed is not None and parse_version(after) >= parse_version(pkg.fixed))
+            or (pkg.fixed is None and was_upgraded)
+        )
 
         if is_fixed:
             row = f"| {pkg.name} | {before} → {after} | {needs} | {advisories} |"
@@ -233,8 +234,8 @@ def build_pr_body(
                 upgraded_transitive.append(row)
             print(f"  ✅ {pkg.name} ({label}) {before} → {after}")
         else:
-            current = f"{before} → {after}" if before != after and after != "unknown" else before
-            row = f"| {pkg.name} | {current} | {needs} | {advisories} |"
+            version = f"{before} → {after}" if was_upgraded else before
+            row = f"| {pkg.name} | {version} | {needs} | {advisories} |"
             if is_direct:
                 direct_rows.append(row)
             else:

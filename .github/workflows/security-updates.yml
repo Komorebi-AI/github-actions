@@ -159,17 +159,30 @@ jobs:
             # fix_version is "null" (string) when no patched version exists
             needs="${fix_version}"
             [[ "$needs" == "null" ]] && needs="unknown"
+            was_upgraded=false
+            [[ "$after" != "unknown" && "$before" != "$after" ]] && was_upgraded=true
 
-            if [[ "$fix_version" != "null" && "$after" != "unknown" ]] && [[ "$(printf '%s\n' "$fix_version" "$after" | sort -V | head -1)" == "$fix_version" ]]; then
+            # Fixed if: version meets the known fix, OR fix is unknown but we upgraded to latest
+            is_fixed=false
+            if [[ "$after" != "unknown" ]]; then
+              if [[ "$fix_version" != "null" ]] && [[ "$(printf '%s\n' "$fix_version" "$after" | sort -V | head -1)" == "$fix_version" ]]; then
+                is_fixed=true
+              elif [[ "$fix_version" == "null" && "$was_upgraded" == "true" ]]; then
+                is_fixed=true
+              fi
+            fi
+
+            if [[ "$is_fixed" == "true" ]]; then
               row="| $pkg | $before → $after | $needs | $advisories |\n"
               if [[ "$label" == "direct" ]]; then direct_rows+="$row"; else fixed_transitive+="$row"; fi
               echo "✅ $pkg ($label) $before → $after"
             else
-              if [[ "$before" != "$after" && "$after" != "unknown" ]]; then
-                row="| $pkg | $before → $after | $needs | $advisories |\n"
+              if [[ "$was_upgraded" == "true" ]]; then
+                version="$before → $after"
               else
-                row="| $pkg | $before | $needs | $advisories |\n"
+                version="$before"
               fi
+              row="| $pkg | $version | $needs | $advisories |\n"
               if [[ "$label" == "direct" ]]; then direct_rows+="$row"; else unfixed_transitive+="$row"; fi
               echo "⚠️  $pkg ($label) stuck at $after — needs $needs"
             fi
