@@ -115,10 +115,15 @@ jobs:
             echo "$pkg=$version"
           done > /tmp/before_versions.txt
 
-          # Run upgrades
-          jq -r '.[].name' /tmp/grouped.json | while read pkg; do
-            echo "Upgrading $pkg..."
-            uv lock --upgrade-package "$pkg"
+          # Run upgrades: pin to fix version when known, upgrade to latest when unknown
+          jq -r '.[] | .name + "\t" + (.fixed // "")' /tmp/grouped.json | while IFS=$'\t' read pkg fixed; do
+            if [[ -n "$fixed" ]]; then
+              echo "Upgrading $pkg to $fixed..."
+              uv lock --upgrade-package "$pkg==$fixed"
+            else
+              echo "Upgrading $pkg to latest (fix version unknown)..."
+              uv lock --upgrade-package "$pkg"
+            fi
           done
 
       - name: Create or update PR

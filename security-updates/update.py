@@ -171,14 +171,21 @@ def read_version(pkg_name: str, lockfile: Path) -> str:
 def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[str, tuple[str, str]]:
     """Run uv lock --upgrade-package for each package.
 
+    When the fix version is known, pin to that version to minimise churn.
+    When unknown, upgrade to latest.
+
     Returns a dict of {package_name: (before_version, after_version)}.
     """
     versions: dict[str, tuple[str, str]] = {}
 
     for pkg in packages:
         before = read_version(pkg.name, lockfile)
-        print(f"Upgrading {pkg.name} (current: {before}, needs: {pkg.fixed})...")
-        result = run(["uv", "lock", "--upgrade-package", pkg.name], check=False)
+        if pkg.fixed:
+            specifier = f"{pkg.name}=={pkg.fixed}"
+        else:
+            specifier = pkg.name
+        print(f"Upgrading {pkg.name} (current: {before}, target: {pkg.fixed or 'latest'})...")
+        result = run(["uv", "lock", "--upgrade-package", specifier], check=False)
         if result.returncode != 0:
             print(f"  Warning: uv lock failed for {pkg.name}: {result.stderr.strip()}")
         after = read_version(pkg.name, lockfile)
