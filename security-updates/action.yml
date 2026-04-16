@@ -20,6 +20,10 @@ inputs:
     description: Title for the PR
     required: false
     default: "security: upgrade vulnerable dependencies"
+  uv-version:
+    description: uv version to install
+    required: false
+    default: latest
 
 runs:
   using: composite
@@ -30,6 +34,8 @@ runs:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
     - uses: astral-sh/setup-uv@v7
+      with:
+        version: ${{ inputs.uv-version }}
     - name: Configure git with app token
       shell: bash
       run: |
