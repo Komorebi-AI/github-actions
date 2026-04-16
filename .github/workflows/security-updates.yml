@@ -119,8 +119,8 @@ jobs:
           now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           jq -r '.[] | .name + "\t" + (.fixed // "")' /tmp/grouped.json | while IFS=$'\t' read pkg fixed; do
             if [[ -n "$fixed" ]]; then
-              echo "Upgrading $pkg to $fixed (overriding exclude-newer)..."
-              uv lock --upgrade-package "$pkg==$fixed" --exclude-newer "$now"
+              echo "Upgrading $pkg to $fixed (overriding exclude-newer for this package)..."
+              uv lock --upgrade-package "$pkg==$fixed" --exclude-newer-package "$pkg=$now"
             else
               echo "Upgrading $pkg to latest (fix version unknown)..."
               uv lock --upgrade-package "$pkg"

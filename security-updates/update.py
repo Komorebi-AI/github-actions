@@ -233,8 +233,12 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
         before = read_version(pkg.name, lockfile)
         if pkg.fixed:
             specifier = f"{pkg.name}=={pkg.fixed}"
-            # Override exclude-newer so verified security fixes are never blocked
-            cmd = ["uv", "lock", "--upgrade-package", specifier, "--exclude-newer", now]
+            # Override exclude-newer for this package only so the global
+            # exclude-newer / exclude-newer-span in the lockfile is preserved.
+            cmd = [
+                "uv", "lock", "--upgrade-package", specifier,
+                "--exclude-newer-package", f"{pkg.name}={now}",
+            ]
         else:
             specifier = pkg.name
             # Respect exclude-newer when upgrading to latest (no verified fix version)
