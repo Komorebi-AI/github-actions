@@ -109,6 +109,15 @@ class VulnerablePackage:
     advisories: list[Advisory] = field(default_factory=list)
 
 
+@dataclass
+class UpgradeResult:
+    before: str
+    after: str
+    collateral: list[tuple[str, str | None, str | None]] = field(default_factory=list)
+    """Other packages changed by this upgrade: (name, old_version, new_version).
+    old_version is None if the package was added, new_version is None if removed."""
+
+
 # ---------------------------------------------------------------------------
 # Core logic
 # ---------------------------------------------------------------------------
@@ -157,6 +166,19 @@ def fetch_alerts(repo: str) -> list[VulnerablePackage]:
     return list(grouped.values())
 
 
+_ALL_VERSIONS_RE = re.compile(
+    r'^\[\[package\]\]\s*\nname\s*=\s*"([^"]+)"\s*\nversion\s*=\s*"([^"]+)"',
+    re.MULTILINE,
+)
+
+
+def read_all_versions(lockfile_content: str | bytes) -> dict[str, str]:
+    """Read all package versions from uv.lock content."""
+    if isinstance(lockfile_content, bytes):
+        lockfile_content = lockfile_content.decode()
+    return dict(_ALL_VERSIONS_RE.findall(lockfile_content))
+
+
 def read_version(pkg_name: str, lockfile: Path) -> str:
     """Read the current version of a package from uv.lock."""
     content = lockfile.read_text()
@@ -168,7 +190,27 @@ def read_version(pkg_name: str, lockfile: Path) -> str:
     return match.group(1) if match else "unknown"
 
 
-def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[str, tuple[str, str]]:
+def _diff_versions(
+    before: dict[str, str], after: dict[str, str], exclude: set[str],
+) -> list[tuple[str, str | None, str | None]]:
+    """Compute package version changes between two lockfile states.
+
+    Returns a sorted list of (name, old_version, new_version) for every
+    package that changed, was added (old=None), or was removed (new=None),
+    excluding packages in *exclude*.
+    """
+    changes: list[tuple[str, str | None, str | None]] = []
+    for name in sorted(set(before) | set(after)):
+        if normalize_name(name) in exclude:
+            continue
+        old = before.get(name)
+        new = after.get(name)
+        if old != new:
+            changes.append((name, old, new))
+    return changes
+
+
+def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[str, UpgradeResult]:
     """Run uv lock --upgrade-package for each package.
 
     When the fix version is known, pin to that version to minimise churn.
@@ -179,9 +221,10 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
     gets removed instead of upgraded because its dependencies can't be
     satisfied without upgrading other locked packages).
 
-    Returns a dict of {package_name: (before_version, after_version)}.
+    Returns a dict of {package_name: UpgradeResult}.
     """
-    versions: dict[str, tuple[str, str]] = {}
+    results: dict[str, UpgradeResult] = {}
+    target_names = {normalize_name(p.name) for p in packages}
 
     for pkg in packages:
         before = read_version(pkg.name, lockfile)
@@ -191,6 +234,7 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
             specifier = pkg.name
 
         snapshot = lockfile.read_bytes()
+        versions_before = read_all_versions(snapshot)
 
         print(f"Upgrading {pkg.name} (current: {before}, target: {pkg.fixed or 'latest'})...")
         result = run(["uv", "lock", "--upgrade-package", specifier], check=False)
@@ -198,7 +242,7 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
         if result.returncode != 0:
             print(f"  Warning: uv lock failed for {pkg.name}: {result.stderr.strip()}")
             lockfile.write_bytes(snapshot)
-            versions[pkg.name] = (before, before)
+            results[pkg.name] = UpgradeResult(before=before, after=before)
             continue
 
         after = read_version(pkg.name, lockfile)
@@ -216,7 +260,11 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
             upgrade_ok = after != "unknown" and after != before
 
         if upgrade_ok:
-            versions[pkg.name] = (before, after)
+            versions_after = read_all_versions(lockfile.read_bytes())
+            collateral = _diff_versions(versions_before, versions_after, target_names)
+            results[pkg.name] = UpgradeResult(
+                before=before, after=after, collateral=collateral,
+            )
         else:
             print(
                 f"  Warning: upgrade did not produce expected result for {pkg.name} "
@@ -224,9 +272,9 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
                 f"restoring lockfile"
             )
             lockfile.write_bytes(snapshot)
-            versions[pkg.name] = (before, before)
+            results[pkg.name] = UpgradeResult(before=before, after=before)
 
-    return versions
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -243,9 +291,35 @@ def _render_table(rows: list[str], empty_message: str = "None.") -> list[str]:
     ]
 
 
+def _render_collateral(pkg_name: str, collateral: list[tuple[str, str | None, str | None]]) -> list[str]:
+    """Render a collapsible details block for collateral changes."""
+    if not collateral:
+        return []
+    n = len(collateral)
+    lines = [
+        "",
+        "<details>",
+        f"<summary><code>{pkg_name}</code> also changed {n} other "
+        f"{'package' if n == 1 else 'packages'}</summary>",
+        "",
+        "| Package | Change |",
+        "|---|---|",
+    ]
+    for name, old, new in collateral:
+        if old is None:
+            lines.append(f"| {name} | added {new} |")
+        elif new is None:
+            lines.append(f"| {name} | removed {old} |")
+        else:
+            lines.append(f"| {name} | {old} → {new} |")
+    lines.append("")
+    lines.append("</details>")
+    return lines
+
+
 def build_pr_body(
     packages: list[VulnerablePackage],
-    versions: dict[str, tuple[str, str]],
+    results: dict[str, UpgradeResult],
     direct_deps: set[str],
 ) -> str:
     """Build a markdown PR body grouped by Direct / Transitive."""
@@ -253,9 +327,13 @@ def build_pr_body(
     not_upgraded_direct: list[str] = []
     upgraded_transitive: list[str] = []
     not_upgraded_transitive: list[str] = []
+    # Collateral details blocks, keyed by section ("direct" / "transitive")
+    collateral_direct: list[list[str]] = []
+    collateral_transitive: list[list[str]] = []
 
     for pkg in packages:
-        before, after = versions[pkg.name]
+        r = results[pkg.name]
+        before, after = r.before, r.after
         advisories = "<br>".join(f"• {a}" for a in pkg.advisories)
         is_direct = normalize_name(pkg.name) in direct_deps
         label = "direct" if is_direct else "transitive"
@@ -272,6 +350,10 @@ def build_pr_body(
         if is_fixed:
             row = f"| {pkg.name} | {before} → {after} | {needs} | {advisories} |"
             (upgraded_direct if is_direct else upgraded_transitive).append(row)
+            if r.collateral:
+                (collateral_direct if is_direct else collateral_transitive).append(
+                    _render_collateral(pkg.name, r.collateral)
+                )
             print(f"  ✅ {pkg.name} ({label}) {before} → {after}")
         else:
             version = f"{before} → {after}" if was_upgraded else before
@@ -284,6 +366,8 @@ def build_pr_body(
     sections.append("## Direct dependencies\n")
     sections.append("### Upgraded\n")
     sections.extend(_render_table(upgraded_direct, "No packages were upgraded."))
+    for block in collateral_direct:
+        sections.extend(block)
     if not_upgraded_direct:
         sections.append("\n### Not upgraded\n")
         sections.extend(_render_table(not_upgraded_direct))
@@ -291,6 +375,8 @@ def build_pr_body(
     sections.append("\n## Transitive dependencies\n")
     sections.append("### Upgraded\n")
     sections.extend(_render_table(upgraded_transitive, "No packages were upgraded."))
+    for block in collateral_transitive:
+        sections.extend(block)
     if not_upgraded_transitive:
         sections.append("\n### Not upgraded\n")
         sections.extend(_render_table(not_upgraded_transitive))
