@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -226,18 +227,24 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
     results: dict[str, UpgradeResult] = {}
     target_names = {normalize_name(p.name) for p in packages}
 
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     for pkg in packages:
         before = read_version(pkg.name, lockfile)
         if pkg.fixed:
             specifier = f"{pkg.name}=={pkg.fixed}"
+            # Override exclude-newer so verified security fixes are never blocked
+            cmd = ["uv", "lock", "--upgrade-package", specifier, "--exclude-newer", now]
         else:
             specifier = pkg.name
+            # Respect exclude-newer when upgrading to latest (no verified fix version)
+            cmd = ["uv", "lock", "--upgrade-package", specifier]
 
         snapshot = lockfile.read_bytes()
         versions_before = read_all_versions(snapshot)
 
         print(f"Upgrading {pkg.name} (current: {before}, target: {pkg.fixed or 'latest'})...")
-        result = run(["uv", "lock", "--upgrade-package", specifier], check=False)
+        result = run(cmd, check=False)
 
         if result.returncode != 0:
             print(f"  Warning: uv lock failed for {pkg.name}: {result.stderr.strip()}")

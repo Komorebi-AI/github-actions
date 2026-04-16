@@ -116,10 +116,11 @@ jobs:
           done > /tmp/before_versions.txt
 
           # Run upgrades: pin to fix version when known, upgrade to latest when unknown
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           jq -r '.[] | .name + "\t" + (.fixed // "")' /tmp/grouped.json | while IFS=$'\t' read pkg fixed; do
             if [[ -n "$fixed" ]]; then
-              echo "Upgrading $pkg to $fixed..."
-              uv lock --upgrade-package "$pkg==$fixed"
+              echo "Upgrading $pkg to $fixed (overriding exclude-newer)..."
+              uv lock --upgrade-package "$pkg==$fixed" --exclude-newer "$now"
             else
               echo "Upgrading $pkg to latest (fix version unknown)..."
               uv lock --upgrade-package "$pkg"
