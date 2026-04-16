@@ -174,6 +174,11 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
     When the fix version is known, pin to that version to minimise churn.
     When unknown, upgrade to latest.
 
+    Snapshots the lockfile before each attempt and restores it if the
+    upgrade fails or produces a broken resolution (e.g. the package
+    gets removed instead of upgraded because its dependencies can't be
+    satisfied without upgrading other locked packages).
+
     Returns a dict of {package_name: (before_version, after_version)}.
     """
     versions: dict[str, tuple[str, str]] = {}
@@ -184,12 +189,42 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
             specifier = f"{pkg.name}=={pkg.fixed}"
         else:
             specifier = pkg.name
+
+        snapshot = lockfile.read_bytes()
+
         print(f"Upgrading {pkg.name} (current: {before}, target: {pkg.fixed or 'latest'})...")
         result = run(["uv", "lock", "--upgrade-package", specifier], check=False)
+
         if result.returncode != 0:
             print(f"  Warning: uv lock failed for {pkg.name}: {result.stderr.strip()}")
+            lockfile.write_bytes(snapshot)
+            versions[pkg.name] = (before, before)
+            continue
+
         after = read_version(pkg.name, lockfile)
-        versions[pkg.name] = (before, after)
+
+        # Validate the upgrade actually produced the expected result.
+        # uv can silently produce a broken resolution (e.g. removing the
+        # package entirely) when the target version's dependencies conflict
+        # with other locked packages.
+        if pkg.fixed:
+            upgrade_ok = (
+                after != "unknown"
+                and parse_version(after) >= parse_version(pkg.fixed)
+            )
+        else:
+            upgrade_ok = after != "unknown" and after != before
+
+        if upgrade_ok:
+            versions[pkg.name] = (before, after)
+        else:
+            print(
+                f"  Warning: upgrade did not produce expected result for {pkg.name} "
+                f"(got {after}, need {pkg.fixed or 'newer than ' + before}), "
+                f"restoring lockfile"
+            )
+            lockfile.write_bytes(snapshot)
+            versions[pkg.name] = (before, before)
 
     return versions
 
