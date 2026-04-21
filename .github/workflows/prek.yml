@@ -15,11 +15,6 @@ on:
         required: false
         type: string
         default: '--all-files'
-      check-ruff-version:
-        required: false
-        type: boolean
-        default: true
-        description: 'Verify the ruff version in uv.lock matches the ruff-pre-commit rev in .pre-commit-config.yaml. Auto-skipped if either file does not reference ruff.'
       debug-enabled:
         required: false
         type: boolean
@@ -69,7 +64,6 @@ jobs:
       - name: Install the project
         run: uv sync --locked --dev --all-extras
       - name: Check ruff versions are in sync
-        if: ${{ inputs.check-ruff-version }}
         run: |
           LOCK_VER=$(awk '/^name = "ruff"$/{getline; if ($1 == "version") {gsub(/"/, "", $3); print $3; exit}}' uv.lock 2>/dev/null || true)
           CONFIG_VER=$(grep -A2 'ruff-pre-commit' .pre-commit-config.yaml 2>/dev/null | grep 'rev:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
