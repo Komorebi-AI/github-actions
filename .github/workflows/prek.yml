@@ -23,8 +23,8 @@ on:
       check-ruff-version:
         required: false
         type: boolean
-        default: false
-        description: 'Verify the ruff version in uv.lock matches the ruff-pre-commit rev in .pre-commit-config.yaml'
+        default: true
+        description: 'Verify the ruff version in uv.lock matches the ruff-pre-commit rev in .pre-commit-config.yaml. Auto-skipped if either file does not reference ruff.'
       debug-enabled:
         required: false
         type: boolean
@@ -76,10 +76,14 @@ jobs:
       - name: Check ruff versions are in sync
         if: ${{ inputs.check-ruff-version }}
         run: |
-          LOCK_VER=$(awk '/^name = "ruff"$/{getline; if ($1 == "version") {gsub(/"/, "", $3); print $3; exit}}' uv.lock)
-          CONFIG_VER=$(grep -A2 'ruff-pre-commit' .pre-commit-config.yaml | grep 'rev:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          LOCK_VER=$(awk '/^name = "ruff"$/{getline; if ($1 == "version") {gsub(/"/, "", $3); print $3; exit}}' uv.lock 2>/dev/null || true)
+          CONFIG_VER=$(grep -A2 'ruff-pre-commit' .pre-commit-config.yaml 2>/dev/null | grep 'rev:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
+          if [ -z "$LOCK_VER" ] && [ -z "$CONFIG_VER" ]; then
+            echo "No ruff in uv.lock or ruff-pre-commit in .pre-commit-config.yaml; skipping check."
+            exit 0
+          fi
           if [ -z "$LOCK_VER" ] || [ -z "$CONFIG_VER" ]; then
-            echo "::error::Could not extract ruff version (uv.lock=$LOCK_VER, .pre-commit-config.yaml=$CONFIG_VER)"
+            echo "::error::Ruff is configured in only one place (uv.lock=$LOCK_VER, .pre-commit-config.yaml=$CONFIG_VER); they must match."
             exit 1
           fi
           if [ "$LOCK_VER" != "$CONFIG_VER" ]; then
