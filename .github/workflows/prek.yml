@@ -15,6 +15,16 @@ on:
         required: false
         type: string
         default: '--all-files'
+      skip-hooks:
+        required: false
+        type: string
+        default: ''
+        description: 'Comma-separated hook IDs to skip (passed to prek via the SKIP env var)'
+      check-ruff-version:
+        required: false
+        type: boolean
+        default: false
+        description: 'Verify the ruff version in uv.lock matches the ruff-pre-commit rev in .pre-commit-config.yaml'
       debug-enabled:
         required: false
         type: boolean
@@ -63,7 +73,23 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Install the project
         run: uv sync --locked --dev --all-extras
+      - name: Check ruff versions are in sync
+        if: ${{ inputs.check-ruff-version }}
+        run: |
+          LOCK_VER=$(awk '/^name = "ruff"$/{getline; if ($1 == "version") {gsub(/"/, "", $3); print $3; exit}}' uv.lock)
+          CONFIG_VER=$(grep -A2 'ruff-pre-commit' .pre-commit-config.yaml | grep 'rev:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          if [ -z "$LOCK_VER" ] || [ -z "$CONFIG_VER" ]; then
+            echo "::error::Could not extract ruff version (uv.lock=$LOCK_VER, .pre-commit-config.yaml=$CONFIG_VER)"
+            exit 1
+          fi
+          if [ "$LOCK_VER" != "$CONFIG_VER" ]; then
+            echo "::error::Ruff version mismatch: uv.lock=$LOCK_VER, .pre-commit-config.yaml=$CONFIG_VER"
+            exit 1
+          fi
+          echo "Ruff versions in sync: $LOCK_VER"
       - name: Run prek
         uses: j178/prek-action@v2
         with:
           extra-args: ${{ inputs.prek-args }}
+        env:
+          SKIP: ${{ inputs.skip-hooks }}
