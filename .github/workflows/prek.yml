@@ -15,11 +15,6 @@ on:
         required: false
         type: string
         default: '--all-files'
-      skip-hooks:
-        required: false
-        type: string
-        default: ''
-        description: 'Comma-separated hook IDs to skip (passed to prek via the SKIP env var)'
       check-ruff-version:
         required: false
         type: boolean
@@ -95,5 +90,3 @@ jobs:
         uses: j178/prek-action@v2
         with:
           extra-args: ${{ inputs.prek-args }}
-        env:
-          SKIP: ${{ inputs.skip-hooks }}
