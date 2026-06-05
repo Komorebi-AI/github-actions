@@ -272,6 +272,19 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
 
         if upgrade_ok:
             versions_after = read_all_versions(lockfile.read_bytes())
+            if versions_before == versions_after:
+                # No package version actually moved — the only change is
+                # metadata (e.g. the per-package exclude-newer timestamp).
+                # This happens when the package is already at the fix version
+                # but the scanner still flags it. Discard the metadata-only
+                # churn so an all-no-op run leaves no diff and opens no PR.
+                print(
+                    f"  No version change for {pkg.name} — only metadata moved, "
+                    f"restoring lockfile"
+                )
+                lockfile.write_bytes(snapshot)
+                results[pkg.name] = UpgradeResult(before=before, after=after)
+                continue
             collateral = _diff_versions(versions_before, versions_after, target_names)
             results[pkg.name] = UpgradeResult(
                 before=before, after=after, collateral=collateral,
@@ -352,6 +365,23 @@ def build_pr_body(
         needs = pkg.fixed or "unknown"
         was_upgraded = after != "unknown" and before != after
 
+        # Drop phantom rows: the package is already at (or above) the fix
+        # version, nothing actually changed, and no other package moved as a
+        # result. These come from stale/false-positive advisories that flag a
+        # version that is in fact already patched (e.g. urllib3 2.7.0 → 2.7.0).
+        # Listing them confuses reviewers, so omit them from the PR body
+        # entirely (they don't belong in "Not upgraded" — they're not stuck).
+        already_satisfied = (
+            pkg.fixed is not None
+            and after != "unknown"
+            and not was_upgraded
+            and not r.collateral
+            and parse_version(after) >= parse_version(pkg.fixed)
+        )
+        if already_satisfied:
+            print(f"  ⏭️  {pkg.name} ({label}) already at {after} (needs {needs}) — skipping")
+            continue
+
         # Fixed if: version meets the known fix, OR fix is unknown but we upgraded to latest
         is_fixed = after != "unknown" and (
             (pkg.fixed is not None and parse_version(after) >= parse_version(pkg.fixed))
@@ -403,7 +433,10 @@ def create_or_update_pr(pr_body: str, branch_name: str, pr_title: str) -> None:
     """Commit changes to uv.lock and open or update a PR."""
     diff = git("diff", "uv.lock")
     if not diff.strip():
-        print("No lockfile changes — all packages may be constrained.")
+        print(
+            "No real package changes (only stale advisories or constrained "
+            "packages) — skipping PR."
+        )
         return
 
     git("config", "user.name", "github-actions[bot]")
