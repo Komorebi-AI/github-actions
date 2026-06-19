@@ -95,9 +95,16 @@ class Advisory:
     severity: str
 
     def markdown_link(self) -> str:
+        # Prefer the GHSA advisory page: it always exists for a Dependabot
+        # alert, whereas a freshly-assigned CVE is often still RESERVED and
+        # returns "CVE ID Not Found" on NVD. Show the CVE as the link text
+        # when we have one, since it's the more familiar identifier.
+        if self.ghsa:
+            text = self.cve or self.ghsa
+            return f"[{text}](https://github.com/advisories/{self.ghsa})"
         if self.cve:
             return f"[{self.cve}](https://nvd.nist.gov/vuln/detail/{self.cve})"
-        return f"[{self.ghsa}](https://github.com/advisories/{self.ghsa})"
+        return "unknown advisory"
 
     def __str__(self) -> str:
         return f"{self.markdown_link()} ({self.severity}): {self.summary}"
@@ -142,10 +149,15 @@ def fetch_alerts(repo: str) -> list[VulnerablePackage]:
     )
     alerts = json.loads(raw)
 
-    # Group by package name
+    # Group by normalized package name. GitHub's advisory database reports
+    # the same package under inconsistent casing across advisories (e.g.
+    # "starlette" and "Starlette"); grouping by the raw name would split it
+    # into two packages, each with its own (lower) fix version, and the
+    # second upgrade would downgrade what the first one fixed.
     grouped: dict[str, VulnerablePackage] = {}
     for a in alerts:
         name = a["name"]
+        key = normalize_name(name)
         fixed = a.get("fixed")
         advisory = Advisory(
             ghsa=a.get("ghsa"),
@@ -153,16 +165,16 @@ def fetch_alerts(repo: str) -> list[VulnerablePackage]:
             summary=a["summary"],
             severity=a["severity"],
         )
-        if name not in grouped:
-            grouped[name] = VulnerablePackage(name=name, fixed=fixed)
+        if key not in grouped:
+            grouped[key] = VulnerablePackage(name=normalize_name(name), fixed=fixed)
         else:
             # Keep the highest fix version (None means no known fix)
             if fixed and (
-                grouped[name].fixed is None
-                or parse_version(fixed) > parse_version(grouped[name].fixed)
+                grouped[key].fixed is None
+                or parse_version(fixed) > parse_version(grouped[key].fixed)
             ):
-                grouped[name].fixed = fixed
-        grouped[name].advisories.append(advisory)
+                grouped[key].fixed = fixed
+        grouped[key].advisories.append(advisory)
 
     return list(grouped.values())
 
