@@ -27,7 +27,7 @@ jobs:
   prek:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # required to grab the history of the PR for prek
           fetch-depth: 0
