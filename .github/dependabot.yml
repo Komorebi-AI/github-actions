@@ -1,0 +1,12 @@
+# Dependabot configuration
+# See https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Keep GitHub Actions used in the reusable workflows and composite actions up to date
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/" # .github/workflows/*
+      - "/security-updates" # composite action.yml
+    schedule:
+      interval: "weekly"
