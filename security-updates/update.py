@@ -341,7 +341,10 @@ def cleanup_temp_exceptions(pyproject: Path, lockfile: Path, keep: set[str]) -> 
         lock_snapshot, pyproject_snapshot = lockfile.read_bytes(), pyproject.read_bytes()
         versions_before = read_all_versions(lock_snapshot)
         if set_temp_exception(pyproject, pkg_name, None):
-            result = run(["uv", "lock"], check=False)
+            # Re-resolve the package at its locked version: uv < 0.11.8 keeps
+            # stale lockfile options on a plain `uv lock` it considers fresh.
+            pinned = f"{pkg_name}=={read_version(pkg_name, lockfile)}"
+            result = run(["uv", "lock", "--upgrade-package", pinned], check=False)
             if result.returncode == 0 and read_all_versions(lockfile.read_bytes()) == versions_before:
                 print(f"Removed temporary cooldown exception for {pkg_name}")
                 removed.append(pkg_name)
@@ -402,11 +405,14 @@ def upgrade_packages(
             result = run([*cmd, "--exclude-newer-package", f"{pkg.name}={now}"], check=False)
             after = read_version(pkg.name, lockfile)
             if result.returncode == 0 and reached_fix(after):
-                # Persist the exception in pyproject.toml and re-lock so the
-                # lockfile options match the project settings.
+                # Persist the exception in pyproject.toml and re-lock with the
+                # same cutoff so the lockfile options match the project
+                # settings (uv < 0.11.8 skips rewriting them on a plain `uv lock`).
                 cutoff = read_exception_cutoff(pkg.name, lockfile)
                 if cutoff is not None and set_temp_exception(pyproject, pkg.name, cutoff):
-                    result = run(["uv", "lock"], check=False)
+                    result = run(
+                        [*cmd, "--exclude-newer-package", f"{pkg.name}={cutoff}"], check=False,
+                    )
                     after = read_version(pkg.name, lockfile)
                     if result.returncode == 0 and reached_fix(after):
                         excepted.append(pkg.name)
