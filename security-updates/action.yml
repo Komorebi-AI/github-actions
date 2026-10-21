@@ -40,6 +40,9 @@ runs:
       shell: bash
       run: |
         git remote set-url origin "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/${{ github.repository }}.git"
+        # Drop the GITHUB_TOKEN header persisted by actions/checkout; git prefers it
+        # over the token in the URL, which attributes pushes to github-actions[bot].
+        git config http.https://github.com/.extraheader ""
     - name: Run security updates
       shell: bash
       run: python "${{ github.action_path }}/update.py"
