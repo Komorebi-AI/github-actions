@@ -663,7 +663,11 @@ def main() -> None:
         )
     if removed:
         notes.append(f"Expired temporary cooldown exceptions removed for: {', '.join(removed)}.")
-    if notes:
+    if not packages:
+        # Cleanup-only run: no alerts, so the upgrade tables would be empty.
+        pr_body = "\n\n".join(notes)
+        pr_title = "chore: remove expired cooldown exceptions"
+    elif notes:
         pr_body += "\n\n" + "\n\n".join(notes)
 
     create_or_update_pr(pr_body, branch_name, pr_title)
