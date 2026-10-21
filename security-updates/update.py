@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -223,8 +224,10 @@ def _diff_versions(
 
 
 # Temporary per-package cooldown exceptions live in pyproject.toml as
-# `exclude-newer-package = { pkg = false }` under [tool.uv]; uv >= 0.11.8
-# rejects lockfiles whose exceptions are not also in pyproject.toml.
+# `exclude-newer-package = { pkg = "<timestamp>" }` under [tool.uv], with the
+# timestamp just after the fixed release's upload time so only that release
+# escapes the cooldown. uv >= 0.11.8 rejects lockfiles whose exceptions are
+# not also in pyproject.toml.
 # This comment line, directly above that key, lists the entries the bot
 # owns, so entries added by hand (e.g. `torch = false`) are never removed.
 TEMP_EXCEPTIONS_MARKER = "# security-updates: temporary cooldown exceptions:"
@@ -253,8 +256,29 @@ def read_temp_exceptions(pyproject: Path) -> set[str]:
     return set()
 
 
-def set_temp_exception(pyproject: Path, pkg_name: str, enabled: bool) -> bool:
-    """Add or remove a bot-owned `pkg = false` cooldown exception.
+def read_exception_cutoff(pkg_name: str, lockfile: Path) -> str | None:
+    """Cutoff just after the latest upload of the locked version of *pkg_name*.
+
+    Read from the upload-time of its sdist/wheels in uv.lock. None when the
+    package has no upload times (e.g. a git or path source).
+    """
+    with open(lockfile, "rb") as f:
+        data = tomllib.load(f)
+    uploads: list[datetime] = []
+    for pkg in data.get("package", []):
+        if normalize_name(pkg["name"]) != normalize_name(pkg_name):
+            continue
+        files = [pkg["sdist"]] if "sdist" in pkg else []
+        files += pkg.get("wheels", [])
+        uploads += [datetime.fromisoformat(f["upload-time"]) for f in files if "upload-time" in f]
+    if not uploads:
+        return None
+    cutoff = max(uploads).astimezone(timezone.utc) + timedelta(seconds=1)
+    return cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def set_temp_exception(pyproject: Path, pkg_name: str, cutoff: str | None) -> bool:
+    """Add (or remove, when *cutoff* is None) a bot-owned cooldown exception.
 
     Only handles the inline-table form under [tool.uv]. Returns False when
     the file has no [tool.uv] table or uses a form this can't edit safely.
@@ -277,8 +301,8 @@ def set_temp_exception(pyproject: Path, pkg_name: str, enabled: bool) -> bool:
             entries[name.strip()] = value.strip()
 
     owned = read_temp_exceptions(pyproject)
-    if enabled:
-        entries[pkg_name] = "false"
+    if cutoff is not None:
+        entries[pkg_name] = f'"{cutoff}"'
         owned.add(pkg_name)
     else:
         if pkg_name not in owned:
@@ -316,7 +340,7 @@ def cleanup_temp_exceptions(pyproject: Path, lockfile: Path, keep: set[str]) -> 
     for pkg_name in sorted(read_temp_exceptions(pyproject) - keep):
         lock_snapshot, pyproject_snapshot = lockfile.read_bytes(), pyproject.read_bytes()
         versions_before = read_all_versions(lock_snapshot)
-        if set_temp_exception(pyproject, pkg_name, enabled=False):
+        if set_temp_exception(pyproject, pkg_name, None):
             result = run(["uv", "lock"], check=False)
             if result.returncode == 0 and read_all_versions(lockfile.read_bytes()) == versions_before:
                 print(f"Removed temporary cooldown exception for {pkg_name}")
@@ -336,7 +360,8 @@ def upgrade_packages(
     When unknown, upgrade to latest.
 
     If the fix version is blocked by the exclude-newer cooldown, retry with
-    a temporary `pkg = false` exception in pyproject.toml.
+    a per-package override and persist it in pyproject.toml as a temporary
+    exception scoped to the fixed release.
 
     Snapshots the lockfile before each attempt and restores it if the
     upgrade fails or produces a broken resolution (e.g. the package
@@ -348,6 +373,8 @@ def upgrade_packages(
     results: dict[str, UpgradeResult] = {}
     excepted: list[str] = []
     target_names = {normalize_name(p.name) for p in packages}
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     for pkg in packages:
         before = read_version(pkg.name, lockfile)
@@ -371,12 +398,22 @@ def upgrade_packages(
 
         if pkg.fixed and (result.returncode != 0 or not reached_fix(after)):
             lockfile.write_bytes(snapshot)
-            if set_temp_exception(pyproject, pkg.name, enabled=True):
-                print(f"  Retrying {pkg.name} with a temporary cooldown exception...")
-                result = run(cmd, check=False)
-                after = read_version(pkg.name, lockfile)
-                if result.returncode == 0 and reached_fix(after):
-                    excepted.append(pkg.name)
+            print(f"  Retrying {pkg.name} with a temporary cooldown exception...")
+            result = run([*cmd, "--exclude-newer-package", f"{pkg.name}={now}"], check=False)
+            after = read_version(pkg.name, lockfile)
+            if result.returncode == 0 and reached_fix(after):
+                # Persist the exception in pyproject.toml and re-lock so the
+                # lockfile options match the project settings.
+                cutoff = read_exception_cutoff(pkg.name, lockfile)
+                if cutoff is not None and set_temp_exception(pyproject, pkg.name, cutoff):
+                    result = run(["uv", "lock"], check=False)
+                    after = read_version(pkg.name, lockfile)
+                    if result.returncode == 0 and reached_fix(after):
+                        excepted.append(pkg.name)
+                else:
+                    print(f"  Warning: can't persist a cooldown exception for {pkg.name}")
+                    lockfile.write_bytes(snapshot)
+                    after = before
 
         if result.returncode != 0:
             print(f"  Warning: uv lock failed for {pkg.name}: {result.stderr.strip()}")
@@ -560,11 +597,11 @@ def build_pr_body(
 
 def create_or_update_pr(pr_body: str, branch_name: str, pr_title: str) -> None:
     """Commit changes to uv.lock (and pyproject.toml) and open or update a PR."""
-    diff = git("diff", "uv.lock")
+    diff = git("diff", "--", "uv.lock", "pyproject.toml")
     if not diff.strip():
         print(
             "No real package changes (only stale advisories or constrained "
-            "packages) — skipping PR."
+            "packages) and no expired exceptions — skipping PR."
         )
         return
 
@@ -609,29 +646,25 @@ def main() -> None:
     packages = fetch_alerts(repo)
     print(f"Packages with open alerts: {len(packages)}")
 
-    if not packages:
-        print("No open alerts — nothing to do.")
-        return
-
     direct_deps = get_direct_dependencies(pyproject)
     versions, excepted = upgrade_packages(packages, lockfile, pyproject)
     pr_body = build_pr_body(packages, versions, direct_deps)
 
-    # Cleanup of expired exceptions rides along with a real upgrade; it never
-    # opens a PR on its own.
-    if git("diff", "uv.lock").strip():
-        removed = cleanup_temp_exceptions(pyproject, lockfile, keep=set(excepted))
-        notes = []
-        if excepted:
-            notes.append(
-                "Temporary cooldown exception (`exclude-newer-package = false` in pyproject.toml) "
-                f"added for: {', '.join(excepted)}. It is removed automatically by a later run "
-                "once the release is older than the cooldown."
-            )
-        if removed:
-            notes.append(f"Expired temporary cooldown exceptions removed for: {', '.join(removed)}.")
-        if notes:
-            pr_body += "\n\n" + "\n\n".join(notes)
+    # Expired exceptions are removed on every run, even when there are no
+    # alerts, so they never outlive the cooldown by more than the PR's review.
+    removed = cleanup_temp_exceptions(pyproject, lockfile, keep=set(excepted))
+    notes = []
+    if excepted:
+        notes.append(
+            "Temporary cooldown exception (`exclude-newer-package` in pyproject.toml) "
+            f"added for: {', '.join(excepted)}. It lets only the fixed release through "
+            "the cooldown and is removed automatically once that release is older than "
+            "the cooldown."
+        )
+    if removed:
+        notes.append(f"Expired temporary cooldown exceptions removed for: {', '.join(removed)}.")
+    if notes:
+        pr_body += "\n\n" + "\n\n".join(notes)
 
     create_or_update_pr(pr_body, branch_name, pr_title)
 

@@ -18,7 +18,7 @@ Runs [prek](https://github.com/j178/prek) hooks using the [prek-action](https://
 
 ### security-updates (reusable workflow)
 
-Automatically upgrades vulnerable dependencies (direct and transitive) in `uv.lock`. Complements tools like Renovate, which can only bump direct dependencies declared in `pyproject.toml`. This workflow reads GitHub Dependabot alerts and runs `uv lock --upgrade-package` for each vulnerable package, then opens (or updates) a single PR with a detailed description of what was upgraded and what couldn't be.
+Automatically upgrades vulnerable dependencies (direct and transitive) in `uv.lock`. Complements tools like Renovate, which can only bump direct dependencies declared in `pyproject.toml`. This workflow reads GitHub Dependabot alerts and runs `uv lock --upgrade-package` for each vulnerable package, then opens (or updates) a single PR with a detailed description of what was upgraded and what couldn't be. When the fix release is blocked by the project's `exclude-newer` cooldown, it adds a temporary `exclude-newer-package` entry for that release to `pyproject.toml` and removes it in a later PR once the release is older than the cooldown.
 
 **Prerequisites:**
 - [Dependabot alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/about-dependabot-alerts) must be enabled on the calling repository
@@ -28,7 +28,7 @@ Automatically upgrades vulnerable dependencies (direct and transitive) in `uv.lo
 
 ### security-updates (composite action)
 
-Same functionality as the reusable workflow above, but implemented as a [composite action](https://docs.github.com/en/actions/sharing-automations/creating-actions/creating-a-composite-action) with a standalone Python script. Use this if you prefer step-level composition over job-level reuse.
+Same functionality as the reusable workflow above (both run the same `security-updates/update.py` script), packaged as a [composite action](https://docs.github.com/en/actions/sharing-automations/creating-actions/creating-a-composite-action). Use this if you prefer step-level composition over job-level reuse.
 
 ## Usage
 
