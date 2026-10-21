@@ -20,7 +20,6 @@ import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -223,62 +222,172 @@ def _diff_versions(
     return changes
 
 
-def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[str, UpgradeResult]:
+# Temporary per-package cooldown exceptions live in pyproject.toml as
+# `exclude-newer-package = { pkg = false }` under [tool.uv]; uv >= 0.11.8
+# rejects lockfiles whose exceptions are not also in pyproject.toml.
+# This comment line, directly above that key, lists the entries the bot
+# owns, so entries added by hand (e.g. `torch = false`) are never removed.
+TEMP_EXCEPTIONS_MARKER = "# security-updates: temporary cooldown exceptions:"
+_EXCLUDE_NEWER_PACKAGE_RE = re.compile(r"^exclude-newer-package\s*=\s*\{(?P<body>[^}]*)\}\s*$")
+
+
+def _tool_uv_section(lines: list[str]) -> tuple[int, int] | None:
+    """Return the [start, end) line range of the [tool.uv] table body."""
+    for i, line in enumerate(lines):
+        if line.strip() == "[tool.uv]":
+            end = next(
+                (j for j in range(i + 1, len(lines)) if lines[j].lstrip().startswith("[")),
+                len(lines),
+            )
+            return i + 1, end
+    return None
+
+
+def read_temp_exceptions(pyproject: Path) -> set[str]:
+    """Packages with a bot-owned cooldown exception in pyproject.toml."""
+    if not pyproject.exists():
+        return set()
+    for line in pyproject.read_text().splitlines():
+        if line.startswith(TEMP_EXCEPTIONS_MARKER):
+            return {p.strip() for p in line[len(TEMP_EXCEPTIONS_MARKER):].split(",") if p.strip()}
+    return set()
+
+
+def set_temp_exception(pyproject: Path, pkg_name: str, enabled: bool) -> bool:
+    """Add or remove a bot-owned `pkg = false` cooldown exception.
+
+    Only handles the inline-table form under [tool.uv]. Returns False when
+    the file has no [tool.uv] table or uses a form this can't edit safely.
+    """
+    lines = pyproject.read_text().splitlines()
+    section = _tool_uv_section(lines)
+    if section is None:
+        return False
+    start, end = section
+
+    key_idx = next((i for i in range(start, end) if lines[i].startswith("exclude-newer-package")), None)
+    entries: dict[str, str] = {}
+    if key_idx is not None:
+        match = _EXCLUDE_NEWER_PACKAGE_RE.match(lines[key_idx])
+        if match is None:
+            print(f"  Warning: can't edit exclude-newer-package in {pyproject}: {lines[key_idx]!r}")
+            return False
+        for item in filter(None, (s.strip() for s in match["body"].split(","))):
+            name, _, value = item.partition("=")
+            entries[name.strip()] = value.strip()
+
+    owned = read_temp_exceptions(pyproject)
+    if enabled:
+        entries[pkg_name] = "false"
+        owned.add(pkg_name)
+    else:
+        if pkg_name not in owned:
+            return False
+        entries.pop(pkg_name, None)
+        owned.discard(pkg_name)
+
+    marker_idx = key_idx - 1 if key_idx is not None and lines[key_idx - 1].startswith(TEMP_EXCEPTIONS_MARKER) else None
+    new_lines: list[str] = []
+    if owned:
+        new_lines.append(f"{TEMP_EXCEPTIONS_MARKER} {', '.join(sorted(owned))}")
+    if entries:
+        body = ", ".join(f"{k} = {v}" for k, v in entries.items())
+        new_lines.append(f"exclude-newer-package = {{ {body} }}")
+
+    if key_idx is None:
+        # Insert right after `exclude-newer = ...`, or at the top of [tool.uv].
+        anchor = next((i for i in range(start, end) if lines[i].startswith("exclude-newer ")), start - 1)
+        lines[anchor + 1:anchor + 1] = new_lines
+    else:
+        first = marker_idx if marker_idx is not None else key_idx
+        lines[first:key_idx + 1] = new_lines
+    pyproject.write_text("\n".join(lines) + "\n")
+    return True
+
+
+def cleanup_temp_exceptions(pyproject: Path, lockfile: Path, keep: set[str]) -> list[str]:
+    """Drop bot-owned exceptions the cooldown no longer needs.
+
+    An exception is no longer needed once removing it and re-locking leaves
+    every locked version unchanged (the fixed release has aged past the
+    cooldown). Packages in *keep* are left alone. Returns removed names.
+    """
+    removed: list[str] = []
+    for pkg_name in sorted(read_temp_exceptions(pyproject) - keep):
+        lock_snapshot, pyproject_snapshot = lockfile.read_bytes(), pyproject.read_bytes()
+        versions_before = read_all_versions(lock_snapshot)
+        if set_temp_exception(pyproject, pkg_name, enabled=False):
+            result = run(["uv", "lock"], check=False)
+            if result.returncode == 0 and read_all_versions(lockfile.read_bytes()) == versions_before:
+                print(f"Removed temporary cooldown exception for {pkg_name}")
+                removed.append(pkg_name)
+                continue
+        lockfile.write_bytes(lock_snapshot)
+        pyproject.write_bytes(pyproject_snapshot)
+    return removed
+
+
+def upgrade_packages(
+    packages: list[VulnerablePackage], lockfile: Path, pyproject: Path,
+) -> tuple[dict[str, UpgradeResult], list[str]]:
     """Run uv lock --upgrade-package for each package.
 
     When the fix version is known, pin to that version to minimise churn.
     When unknown, upgrade to latest.
+
+    If the fix version is blocked by the exclude-newer cooldown, retry with
+    a temporary `pkg = false` exception in pyproject.toml.
 
     Snapshots the lockfile before each attempt and restores it if the
     upgrade fails or produces a broken resolution (e.g. the package
     gets removed instead of upgraded because its dependencies can't be
     satisfied without upgrading other locked packages).
 
-    Returns a dict of {package_name: UpgradeResult}.
+    Returns ({package_name: UpgradeResult}, packages given an exception).
     """
     results: dict[str, UpgradeResult] = {}
+    excepted: list[str] = []
     target_names = {normalize_name(p.name) for p in packages}
-
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     for pkg in packages:
         before = read_version(pkg.name, lockfile)
-        if pkg.fixed:
-            specifier = f"{pkg.name}=={pkg.fixed}"
-            # Override exclude-newer for this package only so the global
-            # exclude-newer / exclude-newer-span in the lockfile is preserved.
-            cmd = [
-                "uv", "lock", "--upgrade-package", specifier,
-                "--exclude-newer-package", f"{pkg.name}={now}",
-            ]
-        else:
-            specifier = pkg.name
-            # Respect exclude-newer when upgrading to latest (no verified fix version)
-            cmd = ["uv", "lock", "--upgrade-package", specifier]
+        specifier = f"{pkg.name}=={pkg.fixed}" if pkg.fixed else pkg.name
+        cmd = ["uv", "lock", "--upgrade-package", specifier]
 
         snapshot = lockfile.read_bytes()
+        pyproject_snapshot = pyproject.read_bytes() if pyproject.exists() else None
         versions_before = read_all_versions(snapshot)
 
         print(f"Upgrading {pkg.name} (current: {before}, target: {pkg.fixed or 'latest'})...")
         result = run(cmd, check=False)
-
-        if result.returncode != 0:
-            print(f"  Warning: uv lock failed for {pkg.name}: {result.stderr.strip()}")
-            lockfile.write_bytes(snapshot)
-            results[pkg.name] = UpgradeResult(before=before, after=before)
-            continue
-
         after = read_version(pkg.name, lockfile)
 
         # Validate the upgrade actually produced the expected result.
         # uv can silently produce a broken resolution (e.g. removing the
         # package entirely) when the target version's dependencies conflict
         # with other locked packages.
+        def reached_fix(after: str) -> bool:
+            return after != "unknown" and parse_version(after) >= parse_version(pkg.fixed)
+
+        if pkg.fixed and (result.returncode != 0 or not reached_fix(after)):
+            lockfile.write_bytes(snapshot)
+            if set_temp_exception(pyproject, pkg.name, enabled=True):
+                print(f"  Retrying {pkg.name} with a temporary cooldown exception...")
+                result = run(cmd, check=False)
+                after = read_version(pkg.name, lockfile)
+                if result.returncode == 0 and reached_fix(after):
+                    excepted.append(pkg.name)
+
+        if result.returncode != 0:
+            print(f"  Warning: uv lock failed for {pkg.name}: {result.stderr.strip()}")
+            lockfile.write_bytes(snapshot)
+            if pyproject_snapshot is not None:
+                pyproject.write_bytes(pyproject_snapshot)
+            results[pkg.name] = UpgradeResult(before=before, after=before)
+            continue
+
         if pkg.fixed:
-            upgrade_ok = (
-                after != "unknown"
-                and parse_version(after) >= parse_version(pkg.fixed)
-            )
+            upgrade_ok = reached_fix(after)
         else:
             upgrade_ok = after != "unknown" and after != before
 
@@ -295,6 +404,10 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
                     f"restoring lockfile"
                 )
                 lockfile.write_bytes(snapshot)
+                if pyproject_snapshot is not None:
+                    pyproject.write_bytes(pyproject_snapshot)
+                if pkg.name in excepted:
+                    excepted.remove(pkg.name)
                 results[pkg.name] = UpgradeResult(before=before, after=after)
                 continue
             collateral = _diff_versions(versions_before, versions_after, target_names)
@@ -308,9 +421,13 @@ def upgrade_packages(packages: list[VulnerablePackage], lockfile: Path) -> dict[
                 f"restoring lockfile"
             )
             lockfile.write_bytes(snapshot)
+            if pyproject_snapshot is not None:
+                pyproject.write_bytes(pyproject_snapshot)
+            if pkg.name in excepted:
+                excepted.remove(pkg.name)
             results[pkg.name] = UpgradeResult(before=before, after=before)
 
-    return results
+    return results, excepted
 
 
 # ---------------------------------------------------------------------------
@@ -442,7 +559,7 @@ def build_pr_body(
 # ---------------------------------------------------------------------------
 
 def create_or_update_pr(pr_body: str, branch_name: str, pr_title: str) -> None:
-    """Commit changes to uv.lock and open or update a PR."""
+    """Commit changes to uv.lock (and pyproject.toml) and open or update a PR."""
     diff = git("diff", "uv.lock")
     if not diff.strip():
         print(
@@ -465,6 +582,8 @@ def create_or_update_pr(pr_body: str, branch_name: str, pr_title: str) -> None:
 
     git("checkout", "-B", branch_name)
     git("add", "uv.lock")
+    if Path("pyproject.toml").exists():
+        git("add", "pyproject.toml")
     git("commit", "-m", "fix: upgrade vulnerable dependencies")
     run(["git", "push", "origin", branch_name, "--force"])
 
@@ -495,8 +614,25 @@ def main() -> None:
         return
 
     direct_deps = get_direct_dependencies(pyproject)
-    versions = upgrade_packages(packages, lockfile)
+    versions, excepted = upgrade_packages(packages, lockfile, pyproject)
     pr_body = build_pr_body(packages, versions, direct_deps)
+
+    # Cleanup of expired exceptions rides along with a real upgrade; it never
+    # opens a PR on its own.
+    if git("diff", "uv.lock").strip():
+        removed = cleanup_temp_exceptions(pyproject, lockfile, keep=set(excepted))
+        notes = []
+        if excepted:
+            notes.append(
+                "Temporary cooldown exception (`exclude-newer-package = false` in pyproject.toml) "
+                f"added for: {', '.join(excepted)}. It is removed automatically by a later run "
+                "once the release is older than the cooldown."
+            )
+        if removed:
+            notes.append(f"Expired temporary cooldown exceptions removed for: {', '.join(removed)}.")
+        if notes:
+            pr_body += "\n\n" + "\n\n".join(notes)
+
     create_or_update_pr(pr_body, branch_name, pr_title)
 
 
