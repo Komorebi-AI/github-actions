@@ -28,7 +28,13 @@ Automatically upgrades vulnerable dependencies (direct and transitive) in `uv.lo
 
 ### security-updates (composite action)
 
-Same functionality as the reusable workflow above (both run the same `security-updates/update.py` script), packaged as a [composite action](https://docs.github.com/en/actions/sharing-automations/creating-actions/creating-a-composite-action). Use this if you prefer step-level composition over job-level reuse.
+Same functionality as the reusable workflow above (both run the same `security-updates/update.py` script), packaged as a [composite action](https://docs.github.com/en/actions/sharing-automations/creating-actions/creating-a-composite-action). This is the variant used by the Komorebi-AI repositories (via [python-template](https://github.com/Komorebi-AI/python-template)).
+
+**Prerequisites:**
+- [Dependabot alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/about-dependabot-alerts) must be enabled on the calling repository
+- The `komorebi-security-bot` GitHub App installed on the repository, with its ID and private key stored as the repository (or organization) secrets `SECURITY_APP_ID` and `SECURITY_APP_PRIVATE_KEY`. The action exchanges them for an installation token (via [actions/create-github-app-token](https://github.com/actions/create-github-app-token)), so branches are pushed and PRs opened as the App.
+
+Inputs: `app-id` and `private-key` (required), `branch-name`, `pr-title`, `uv-version`.
 
 ## Usage
 
@@ -101,30 +107,33 @@ jobs:
       ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 ```
 
-Security update as a composite action. The caller defines the job and checkout, and uses the action at the step level:
+Security update as a composite action (as in python-template). The caller defines the job, schedule and checkout, and uses the action at the step level:
 
 ```yaml
-name: Security Update
+name: Security Updates
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: "37 3 * * 1"
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
-  security:
+  security-updates:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          token: ${{ secrets.RENOVATE_TOKEN }}
       - uses: Komorebi-AI/github-actions/security-updates@main
         with:
-          token: ${{ secrets.RENOVATE_TOKEN }}
+          app-id: ${{ secrets.SECURITY_APP_ID }}
+          private-key: ${{ secrets.SECURITY_APP_PRIVATE_KEY }}
+          pr-title: "security: upgrade vulnerable dependencies"
+          uv-version: 0.13.4
 ```
 
 See other usage examples in the [Komorebi-AI/python-template](https://github.com/Komorebi-AI/python-template) repository:
@@ -147,7 +156,7 @@ Secrets are also optional:
 
 - if `codecov-token` is set coverage will be computed and uploaded to Codecov
 - if `ssh-private-key` is set dependencies can be installed from Github repositories inside the Komorebi-AI organization using SSH (via the [ssh-agent](https://github.com/webfactory/ssh-agent) Github Action)
-- `token` is **required** for `security-updates` — a GitHub PAT (classic) with `repo` scope, used to read Dependabot alerts, push branches, and create/update PRs
+- `token` is **required** for the `security-updates` reusable workflow — a GitHub PAT (classic) with `repo` scope, used to read Dependabot alerts, push branches, and create/update PRs. The composite action takes the GitHub App credentials as inputs instead (see above).
 
 To pass all secrets to called workflow use `secrets: inherit`.
 
