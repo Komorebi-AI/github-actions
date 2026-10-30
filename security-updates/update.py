@@ -385,6 +385,16 @@ def upgrade_packages(
 
     for pkg in packages:
         before = read_version(pkg.name, lockfile)
+        # An earlier upgrade in this run may already have pulled the package past
+        # its fix version; pinning it to the fix would then downgrade it.
+        if (
+            pkg.fixed
+            and before != "unknown"
+            and parse_version(before) >= parse_version(pkg.fixed)
+        ):
+            print(f"Skipping {pkg.name} (current: {before} already >= {pkg.fixed})")
+            results[pkg.name] = UpgradeResult(before=before, after=before)
+            continue
         specifier = f"{pkg.name}=={pkg.fixed}" if pkg.fixed else pkg.name
         cmd = ["uv", "lock", "--upgrade-package", specifier]
 
