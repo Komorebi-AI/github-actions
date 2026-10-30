@@ -132,10 +132,14 @@ class UpgradeResult:
 
 def fetch_alerts(repo: str) -> list[VulnerablePackage]:
     """Fetch open Dependabot alerts and group by package."""
+    # --paginate: the endpoint returns 30 alerts per page (newest first, any
+    # state), so without it only the most recent alerts are ever seen. With
+    # --jq each page is filtered separately, so emit one object per line.
     raw = gh(
-        "api", f"/repos/{repo}/dependabot/alerts",
+        "api", f"/repos/{repo}/dependabot/alerts?state=open&per_page=100",
+        "--paginate",
         "--jq", (
-            '[.[] | select(.state == "open" and '
+            '.[] | select(.state == "open" and '
             '.dependency.package.ecosystem == "pip") | '
             "{"
             "name: .dependency.package.name, "
@@ -144,10 +148,10 @@ def fetch_alerts(repo: str) -> list[VulnerablePackage]:
             "cve: .security_advisory.cve_id, "
             "summary: .security_advisory.summary, "
             "severity: .security_advisory.severity"
-            "}]"
+            "}"
         ),
     )
-    alerts = json.loads(raw)
+    alerts = [json.loads(line) for line in raw.splitlines() if line.strip()]
 
     # Group by normalized package name. GitHub's advisory database reports
     # the same package under inconsistent casing across advisories (e.g.
