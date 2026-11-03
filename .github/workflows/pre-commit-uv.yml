@@ -3,6 +3,13 @@ name: pre-commit
 on:
   workflow_call:
     inputs:
+      runs-on:
+        required: false
+        type: string
+        # 1-core slim runner: a third the price of ubuntu-latest, and our
+        # lint jobs measured only ~1.3x slower on it. Pass ubuntu-latest for
+        # jobs that are CPU-bound or run over the slim 15-minute job ceiling.
+        default: ubuntu-slim
       python-version:
         required: false
         type: string
@@ -25,7 +32,7 @@ on:
 
 jobs:
   pre-commit:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     steps:
       - uses: actions/checkout@v7
         with:
