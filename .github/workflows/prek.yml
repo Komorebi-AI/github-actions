@@ -72,7 +72,7 @@ jobs:
       - name: Install the project
         run: uv sync --locked --dev --all-extras
       - name: Run prek
-        uses: j178/prek-action@5337cb91e0fa35a7ff31b9ca345126d8bbbcdf16 # v2.0.6
+        uses: j178/prek-action@7b101f8338a08d2bd6fdb3625e4e7692428763a3 # v3.1.1
         env:
           # Enables zizmor's online audits.
           GH_TOKEN: ${{ github.token }}
