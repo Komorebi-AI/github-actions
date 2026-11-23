@@ -34,16 +34,17 @@ jobs:
   pre-commit:
     runs-on: ${{ inputs.runs-on }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # required to grab the history of the PR for pre-commit
           fetch-depth: 0
+          persist-credentials: false
       - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
+        uses: mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113 # v3.24
         if: ${{ inputs.debug-enabled }}
         with:
           detached: true
-      - uses: webfactory/ssh-agent@v0.10.0
+      - uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
         env: 
             ssh-private-key: ${{ secrets.ssh-private-key }}
         if: ${{ env.ssh-private-key != '' }}
@@ -55,7 +56,7 @@ jobs:
       # `requires-python` field of the `pyproject.toml` file.
       - name: Install uv and Python
         if: ${{ inputs.python-version != '' }}
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ inputs.uv-version }}
           enable-cache: true
@@ -63,7 +64,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
       - name: Install uv and Python using .python-version
         if: ${{ inputs.python-version == '' }}
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ inputs.uv-version }}
           enable-cache: true
@@ -72,6 +73,6 @@ jobs:
         run: |
           uv sync --locked --dev --all-extras
           uv pip install pre-commit-uv
-      - uses: pre-commit/action@v3.0.1
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
         with:
           extra_args: ${{ inputs.pre-commit-args }}

@@ -34,31 +34,33 @@ jobs:
   fix-transitive-vulns:
     runs-on: ${{ inputs.runs-on }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.token }}
+          persist-credentials: true # zizmor: ignore[artipacked] update.py pushes with these credentials
       - name: Setup tmate session
-        uses: mxschmitt/action-tmate@v3
+        uses: mxschmitt/action-tmate@35b54afac29c97fb54faba5b513f8fbd1882f113 # v3.24
         if: ${{ inputs.debug-enabled }}
         with:
           detached: true
-      - uses: webfactory/ssh-agent@v0.10.0
+      - uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
         env:
           ssh-private-key: ${{ secrets.ssh-private-key }}
         if: ${{ env.ssh-private-key != '' }}
         with:
           ssh-private-key: ${{ secrets.ssh-private-key }}
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ inputs.uv-version }}
       # Same script as the security-updates composite action, at the
       # revision of this workflow.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: .komorebi-github-actions
+          persist-credentials: false
       - name: Run security updates
         run: python .komorebi-github-actions/security-updates/update.py
         env:
