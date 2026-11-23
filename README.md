@@ -14,7 +14,7 @@ Runs pre-commit hooks using uv and [pre-commit-uv](https://github.com/tox-dev/pr
 
 ### prek
 
-Runs [prek](https://github.com/j178/prek) hooks using the [prek-action](https://github.com/j178/prek-action). prek is a fast, Rust-based drop-in replacement for pre-commit.
+Runs [prek](https://github.com/j178/prek) hooks using the [prek-action](https://github.com/j178/prek-action). prek is a fast, Rust-based drop-in replacement for pre-commit. It passes the job's `GITHUB_TOKEN` as `GH_TOKEN` so the [zizmor](https://docs.zizmor.sh/) hook runs its online audits.
 
 ### security-updates (reusable workflow)
 
@@ -35,6 +35,12 @@ Same functionality as the reusable workflow above (both run the same `security-u
 - The `komorebi-security-bot` GitHub App installed on the repository, with its ID and private key stored as the repository (or organization) secrets `SECURITY_APP_ID` and `SECURITY_APP_PRIVATE_KEY`. The action exchanges them for an installation token (via [actions/create-github-app-token](https://github.com/actions/create-github-app-token)), so branches are pushed and PRs opened as the App.
 
 Inputs: `app-id` and `private-key` (required), `branch-name`, `pr-title`, `uv-version`.
+
+The App token is limited to `contents: write`, `pull-requests: write` and `vulnerability-alerts: read`.
+
+## Security linting
+
+The workflows and actions in this repository are checked with [zizmor](https://docs.zizmor.sh/) through prek (`.pre-commit-config.yaml`, run by `.github/workflows/prek-self.yml`). Run it locally with `uvx prek run --all-files`. Third-party actions are pinned to commit SHAs (kept up to date by Dependabot); `Komorebi-AI/*` references may use branch or tag refs (`.github/zizmor.yml`).
 
 ## Usage
 
@@ -125,9 +131,10 @@ jobs:
   security-updates:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: Komorebi-AI/github-actions/security-updates@main
         with:
           app-id: ${{ secrets.SECURITY_APP_ID }}
