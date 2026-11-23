@@ -40,7 +40,7 @@ The App token is limited to `contents: write`, `pull-requests: write` and `vulne
 
 ## Security linting
 
-The workflows and actions in this repository are checked with [zizmor](https://docs.zizmor.sh/) through prek (`.pre-commit-config.yaml`, run by `.github/workflows/prek-self.yml`). Run it locally with `uvx prek run --all-files`. Third-party actions are pinned to commit SHAs (kept up to date by Dependabot); `Komorebi-AI/*` references may use branch or tag refs (`.github/zizmor.yml`).
+The workflows and actions in this repository are checked with [zizmor](https://docs.zizmor.sh/) on every PR and push to main (`.github/workflows/zizmor.yml`). Run it locally with `uvx zizmor .`. Third-party actions are pinned to commit SHAs (kept up to date by Dependabot); `Komorebi-AI/*` references may use branch or tag refs (`.github/zizmor.yml`).
 
 ## Usage
 

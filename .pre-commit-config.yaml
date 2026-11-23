@@ -1,6 +1,0 @@
-# prek configuration (https://github.com/j178/prek)
-repos:
-  - repo: https://github.com/zizmorcore/zizmor-pre-commit
-    rev: v1.32.0
-    hooks:
-      - id: zizmor
